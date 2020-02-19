@@ -1,14 +1,16 @@
 # RLStudy
 
-1. DQN
+1. SARSA, DQN
 
-2. TRPO
+2. Policy Gradient, A2C
 
-3. PPO
+3. DPG, DDPG
 
-4. DDPG
+4. TRPO
 
-5. Tsallis
+5. PPO
+
+6. Tsallis, SAC
 
 - reference : https://spinningup.openai.com/en/latest/index.html
 
