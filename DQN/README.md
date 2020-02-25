@@ -1,10 +1,16 @@
-#### OpenAI Gym
-#### Tensorflow / Pytorch
+### OpenAI Gym
 
-### **Env list**
+
+### Tensorflow / Pytorch
+
+
+#### **Env list**
 Pendulum-v0
+
 MountainCar-v0
 
-### **Goal**
+
+#### **Goal**
 Loss graph
+
 Return graph
