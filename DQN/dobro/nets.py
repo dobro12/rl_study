@@ -7,10 +7,10 @@ import time
 import os
 
 class Agent:
-    def __init__(self, env):
+    def __init__(self, env, env_name):
         self.env = env
         self.name = 'dqn'
-        self.checkpoint_dir='checkpoint'
+        self.checkpoint_dir='{}/checkpoint'.format(env_name)
         self.epsilon = 1.0
         self.epsilon_decay = 0.9999
         self.min_epsilon = 0.01
@@ -31,7 +31,7 @@ class Agent:
         self.Y = tf.placeholder(tf.float32, [None], name='Y')
 
         self.Q = self._build_model('main')
-        self.train_op, self.cost = self._build_op('main')
+        self.train_op, self.loss = self._build_op('main')
         self.target_Q = self._build_model('target')
         self.copy_op = self._build_update_target_model()
 
@@ -51,11 +51,11 @@ class Agent:
     def _build_op(self, name):
         one_hot = tf.one_hot(self.A, self.n_action, 1.0, 0.0)
         Q_value = tf.reduce_sum(tf.multiply(one_hot, self.Q), axis=1)
-        cost = tf.reduce_mean(tf.square(self.Y - Q_value))
+        loss = tf.reduce_mean(tf.square(self.Y - Q_value))
 
         model_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=name)
-        train_op = tf.train.AdamOptimizer(self.learning_rate, beta1=0.5, beta2=0.999).minimize(cost, var_list=model_vars)
-        return train_op, cost
+        train_op = tf.train.AdamOptimizer(self.learning_rate, beta1=0.5, beta2=0.999).minimize(loss, var_list=model_vars)
+        return train_op, loss
 
     def _build_update_target_model(self):
         copy_op = []
@@ -100,8 +100,8 @@ class Agent:
                 _target.append(reward)
             else:
                 _target.append(reward + self.discount_factor*np.amax(next_Q_value[i]))
-        Q,_ = self.sess.run([self.Q, self.train_op], feed_dict={self.X:_state, self.Y:_target, self.A:_action})
-        return Q
+        _, Q, loss = self.sess.run([self.train_op, self.Q, self.loss], feed_dict={self.X:_state, self.Y:_target, self.A:_action})
+        return Q, loss
         
     def test(self):
         self.epsilon = 0.0
