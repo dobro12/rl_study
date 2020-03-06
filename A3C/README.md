@@ -7,7 +7,7 @@
 #### **Env list**
 Pendulum-v0
 
-DobroHalfCheetah-vo
+DobroHalfCheetah-v0
 
 #### **Goal**
 Loss graph
