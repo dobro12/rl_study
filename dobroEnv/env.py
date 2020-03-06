@@ -85,7 +85,7 @@ class Env(gym.Env):
         electrocity_cost = np.abs(np.multiply(self.model.applied_forces, joint_vel)).mean()
         reward = base_vel[0] - 5e-4*electrocity_cost
         #reward = base_vel[0]
-        info = None
+        info = {}
 
         return state, reward, done, info
 

@@ -7,6 +7,7 @@ import os
 class Logger:
     def __init__(self, env_name, save_name):
         now = time.localtime()
+        self.save_name = save_name
         save_name = '{}/{}_log'.format(env_name, save_name.lower())
         if not os.path.isdir(save_name):
             os.makedirs(save_name)
