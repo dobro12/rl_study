@@ -13,7 +13,7 @@ class HalfCheetah(object):
     def __init__( self, pybullet_client, useFixedBase=True, arg_parser=None):
         self.pybullet_client = pybullet_client
 
-        self.init_base_pos = [0, 0, 0]
+        self.init_base_pos = [0, -0.1, 0]
         self.init_base_orn = self.pybullet_client.getQuaternionFromEuler([-np.pi/2, 0, 0])
         [self.sim_model] = self.pybullet_client.loadMJCF( \
             "mujoco/half_cheetah.xml", \
@@ -21,6 +21,7 @@ class HalfCheetah(object):
             p1.URDF_USE_SELF_COLLISION_EXCLUDE_ALL_PARENTS )
         self.pybullet_client.resetBasePositionAndOrientation(self.sim_model, self.init_base_pos, self.init_base_orn)
     
+        self.action = []
         self.joints = []
         self.force_coef = []
         self.joint_info = []
@@ -42,6 +43,7 @@ class HalfCheetah(object):
         self.state_id = self.pybullet_client.saveState()
 
     def reset(self):
+        self.action = []
         self.pybullet_client.restoreState(self.state_id)
         self.applied_forces = [0.0 for i in range(len(self.joints))]
         return self.get_state()
@@ -80,13 +82,20 @@ class HalfCheetah(object):
         return body_contact, contact_feet
 
     def apply_action(self, action):
+        action = np.clip(action, -1.0, 1.0)
+        if len(self.action) == 0:
+            self.action = action
+        else:
+            w = 0.9
+            self.action = w*self.action + (1-w)*action
+            action = self.action
         Kp = 500
         Kd = 6
         self.applied_forces = []
         for i,j in enumerate(self.joints):
             p_low, p_high = self.joint_info[i][8:10]
             #p_d = ((np.clip(action[i], -1.0, 1.0) + 1)/2) * (p_high - p_low) + p_low
-            p_d = np.clip(action[i], -1.0, 1.0)
+            p_d = action[i]
             force = Kp*(p_d - self.joint_pos[i]) - Kd*self.joint_vel[i]
             force = np.clip(force, -100, 100)
 

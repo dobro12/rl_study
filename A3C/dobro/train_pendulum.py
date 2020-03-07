@@ -24,13 +24,16 @@ import time
 import sys
 import gym
 
-#env_name = 'Pendulum-v0'
-#env_name = 'CartPole-v1'
-env_name = 'DobroHalfCheetah-v0'
+env_name = 'Pendulum-v0'
+agent_args = {'hidden1':8,
+            'hidden2':8,
+            'v_lr':1e-3,
+            'p_lr':1e-4,
+            'init_std':0.0}
 
 def train():
     global total_step, total_max_step, env_name, global_agent, step_period, gamma, \
-            loss_logger, score_logger, graph, p_losses, v_losses, entropies, scores
+            loss_logger, score_logger, graph, p_losses, v_losses, entropies, scores, agent_args
     gamma = 0.99
     num_thread = 10
     total_step = 0
@@ -40,8 +43,7 @@ def train():
     save_name = env_name.split('-')[0]
 
     env = gym.make(env_name)
-    env.unwrapped.initialize(is_render=False)
-    global_agent = Agent("global", env, save_name, gamma)
+    global_agent = Agent("global", env, save_name, gamma, agent_args)
     loss_logger = Logger(save_name, 'loss')
     score_logger = Logger(save_name, 'score')
     graph = Graph(1000, save_name.upper(), 'A3C')
@@ -54,10 +56,9 @@ def train():
 
     def thread_func(t_idx):
         global total_step, total_max_step, env_name, global_agent, step_period, gamma, \
-                loss_logger, score_logger, graph, p_losses, v_losses, entropies, scores
+                loss_logger, score_logger, graph, p_losses, v_losses, entropies, scores, agent_args
         env = gym.make(env_name)
-        env.unwrapped.initialize(is_render=False)
-        agent = Agent("local_{}".format(t_idx), env, save_name, gamma)
+        agent = Agent("local_{}".format(t_idx), env, save_name, gamma, agent_args)
         episode = 0
         step = 0
 
@@ -89,7 +90,6 @@ def train():
             ####### modify reward function #######
             #reward = 200-cnt if done else 0
             #reward /= 10
-            reward += 1
             ####### modify reward function #######
             states.append(state)
             actions.append(action)
@@ -128,7 +128,7 @@ def train():
             #score_logger.write([cnt, score])
             if done:
                 episode += 1
-                if t_idx == 0 and episode%100 == 0: 
+                if t_idx == 0 and episode%10 == 0: 
                     global_agent.save()
                 scores.append(score)
                 print(t_idx,score)
@@ -146,12 +146,11 @@ def train():
 
 
 def test():
-    global env_name
+    global env_name, agent_args
     save_name = env_name.split('-')[0]
     gamma = 0.99
     env = gym.make(env_name)
-    env.unwrapped.initialize(is_render=True)
-    agent = Agent("global", env, save_name, gamma)
+    agent = Agent("global", env, save_name, gamma, agent_args)
     episodes = int(1e6)
 
     for episode in range(episodes):
@@ -159,6 +158,8 @@ def test():
         done = False
 
         while not done:
+            print(state)
+            time.sleep(0.1)
             #action = agent.get_action(state, False)
             action = agent.get_action(state, True)
             #if action[0] > 0:
@@ -168,7 +169,7 @@ def test():
             state, reward, done, info = env.step(action)
             #state, reward, done, info = env.step(a_t)
             env.render()
-            #time.sleep(0.1)
+            #time.sleep(1)
 
 if len(sys.argv)== 2 and sys.argv[1] == 'test':
     test()

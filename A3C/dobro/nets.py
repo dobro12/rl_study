@@ -7,7 +7,7 @@ import time
 import os
 
 class Agent:
-    def __init__(self, agent_name, env, env_name, gamma):
+    def __init__(self, agent_name, env, env_name, gamma, args):
         self.env = env
         self.name = agent_name
         self.checkpoint_dir='{}/checkpoint'.format(env_name)
@@ -19,11 +19,16 @@ class Agent:
         self.action_bound_max = env.action_space.high
         #self.action_bound_min = np.array([-1.0])
         #self.action_bound_max = np.array([1.0])
-        self.hidden1_units = 128
-        self.hidden2_units = 256
-        self.v_lr = 1e-3
-        self.p_lr = 1e-4 #1e-4
-        self.init_std = 0.0 #1.0
+        #self.hidden1_units = 128
+        #self.hidden2_units = 256
+        #self.v_lr = 1e-3
+        #self.p_lr = 1e-4 #1e-4
+        #self.init_std = 0.0 #1.0
+        self.hidden1_units = args['hidden1']
+        self.hidden2_units = args['hidden2']
+        self.v_lr = args['v_lr']
+        self.p_lr = args['p_lr']
+        self.init_std = args['init_std']
 
         with tf.variable_scope(self.name):
             #placeholder
