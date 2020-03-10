@@ -199,6 +199,7 @@ if __name__ == "__main__":
         actions = []
         rewards = []
         dones =[]
+        next_states = []
         for episode in range(episodes):
             score = 0
             state = env.reset()
@@ -209,16 +210,18 @@ if __name__ == "__main__":
                 actions.append(action)
                 rewards.append(reward)
                 dones.append(done)
+                next_states.append(next_state) 
                 score += reward
-
-                if done: break
+                if done:
+                    break
                 state = next_state
             scores.append(score)
 
         targets = []
         for i in range(len(states)):
             if dones[-i-1]:
-                ret = 0
+                #ret = 0
+                ret = agent.get_value(next_states[-i-1])
             ret = rewards[-i-1] + gamma*ret
             targets.append(ret)
         targets = targets[::-1]

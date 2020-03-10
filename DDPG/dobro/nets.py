@@ -1,20 +1,13 @@
-import roboschool
-import gym
-
 from collections import deque
+import tensorflow as tf
 import numpy as np
 import pickle
-import tensorflow as tf
-import tflearn
 import random
 import copy
 import time
 import os
 
-from graph_drawer import Graph
-from replay_buffer import ReplayBuffer
-
-class OrnsteinUhlenbeckActionNoise:
+class OUActionNoise: # OrnsteinUhlenbeckActionNoise:
     def __init__(self, mu, sigma=0.3, theta=.15, dt=1e-2, x0=None):
         self.theta = theta
         self.mu = mu
@@ -36,261 +29,192 @@ class OrnsteinUhlenbeckActionNoise:
         return 'OrnsteinUhlenbeckActionNoise(mu={}, sigma={})'.format(self.mu, self.sigma)
 
 class Agent:
-    def __init__(self, env):
-        self.name = 'DDPG'
-        self.critic_lr = 1e-3
-        self.actor_lr = 1e-4
-        self.discount_factor = 0.99
-        self.n_action = env.action_space.shape[0]
-        self.action_bound = env.action_space.high[0]
-        self.state_dim = env.observation_space.shape[0]
+    def __init__(self, env, args):
         self.env = env
-        self.save_freq = 50
-        self.soft_update = 1e-3
+        self.name = args['agent_name']
+        self.checkpoint_dir='{}/checkpoint'.format(args['env_name'])
+        self.discount_factor = args['discount_factor']
+        self.state_dim = env.observation_space.shape[0]
+        self.action_dim = env.action_space.shape[0]
+        self.action_bound_min = env.action_space.low
+        self.action_bound_max = env.action_space.high
+        self.hidden1_units = args['hidden1']
+        self.hidden2_units = args['hidden2']
+        self.v_lr = args['v_lr']
+        self.p_lr = args['p_lr']
+        self.soft_update = args['soft_update']
+        self.replay_memory = deque(maxlen=int(1e5))
+        self.actor_noise = OUActionNoise(mu=np.zeros(self.action_dim))
 
-        #self.replay_memory = deque(maxlen=2000)
-        try:
-            with open('replay.pkl', 'rb') as f:
-                self.replay_memory = pickle.load(f)
-        except:
-            self.replay_memory = ReplayBuffer(100000, 1234)
         self.train_start = int(1e4)
-        self.batch_size = int(1e3)#256
+        self.batch_size = int(1e3)
         self.epsilon = 1.0
         self.epsilon_decay = 0.9999
         self.min_epsilon = 0.01
 
-        self.actor_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(self.n_action))
+        with tf.variable_scope(self.name):
+            #placeholder
+            self.states = tf.placeholder(tf.float32, [None, self.state_dim], name='State')
+            self.actions = tf.placeholder(tf.float32, [None, self.action_dim], name='Action')
+            self.targets = tf.placeholder(tf.float32, [None,], name='targets')
 
-        self.X = tf.placeholder(tf.float32, [None, self.state_dim], name='X')
-        self.Q_Action_Gradient = tf.placeholder(tf.float32, [None, self.n_action], name='Q_Action_Gradient')
-        self.A = tf.placeholder(tf.float32, [None, self.n_action], name='Action')
-        self.Y = tf.placeholder(tf.float32, [None, 1], name='Target_Q_value')
+            #action & value
+            self.policy = self.build_policy_model('policy')
+            self.value = self.build_value_model('value')
+            self.target_policy = self.build_policy_model('target_policy')
+            self.target_value = self.build_value_model('target_value')
+            self.sample_action = self.unnormalize_action(self.policy)
+            self.norm_action = self.normalize_action(self.actions)
 
-        with tf.variable_scope('critic'):
-            self.global_step = tf.Variable(0, trainable=False, name='global_step')
-        self.critic = self._build_critic()
-        self.target_critic = self._build_critic('target_critic')
-        self.train_critic_op, self.Q_loss = self._build_critic_op()
-        self.actor = self._build_actor()
-        self.target_actor = self._build_actor('target_actor')
-        self.train_actor_op = self._build_actor_op()
-        self.update_target_model = self._build_update_target_model()
-        self.action_q_gradient = tf.gradients(self.critic, self.A)
+            #policy loss
+            self.q_action_gradient = tf.gradients(self.value, self.actions)
+            self.p_loss = -tf.multiply(self.policy, self.q_action_gradient)
+            p_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/policy')
+            p_optimizer = tf.train.AdamOptimizer(learning_rate=self.p_lr)
+            self.p_train_op = p_optimizer.minimize(self.p_loss, var_list=p_vars)
 
-        self.sess = tf.Session()
-        self.load()
-        self.init_target_model()
+            #value loss
+            self.v_loss = 0.5*tf.square(self.targets - self.value)
+            self.v_loss = tf.reduce_sum(self.v_loss)
+            v_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/value')
+            v_optimizer = tf.train.AdamOptimizer(learning_rate=self.v_lr)
+            self.v_train_op = v_optimizer.minimize(self.v_loss, var_list=v_vars)
 
-        print(self.sess.run(self.global_step))
+            #assign operator
+            self.soft_update_op = self.build_soft_update_op()
+            self.init_target_op = self.build_init_target_op()
 
-    def _build_actor(self, name='actor'):
+            #make session and load model
+            self.sess = tf.Session()
+            self.load()
+
+            #initialize target network
+            self.sess.run(self.init_target_op)
+
+    def build_policy_model(self, name='policy'):
         with tf.variable_scope(name):
-            model = tf.layers.dense(self.X, 300, name='dense_0', activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
+            model = tf.layers.dense(self.states, self.hidden1_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
             model = tf.layers.batch_normalization(model)
-            model = tf.nn.relu(model)
-
-            model = tf.layers.dense(model, 600, name='dense_1', activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            model = tf.layers.batch_normalization(model)
-            model = tf.nn.relu(model)
-
-            model = tf.layers.dense(model, self.n_action, name='dense_2', activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
             model = tf.nn.tanh(model)
-            policy = tf.multiply(model, self.action_bound)
-
-            return policy
-
-    def _build_actor_op(self, name='actor'):
-        model_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=name)
-        gradients = tf.gradients(self.actor, model_vars, -self.Q_Action_Gradient)
-        batch_gradients = list(map(lambda x: tf.div(x, self.batch_size), gradients))
-
-        with tf.variable_scope(name):
-            train_op = tf.train.AdamOptimizer(self.actor_lr, beta1=0.5, beta2=0.999).apply_gradients(zip(batch_gradients, model_vars))
-
-        return train_op
-
-    def _build_critic(self, name='critic'):
-        with tf.variable_scope(name):
-            model = tf.layers.dense(self.X, 400, name='dense_0', activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
+            model = tf.layers.dense(model, self.hidden2_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
             model = tf.layers.batch_normalization(model)
-            model = tf.nn.relu(model)
+            model = tf.nn.tanh(model)
+            model = tf.layers.dense(model, self.action_dim, activation=tf.tanh, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
+        return model
 
-            t1 = tf.layers.dense(model, 300, name='dense_1', use_bias=False, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            t2 = tf.layers.dense(self.A, 300, name='dense_2', activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-
-            model = tf.nn.relu(tf.add(t1, t2))
-
-            Q = tf.layers.dense(model, 1, name='dense_3', activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            return Q
-
-    def _build_critic_op(self, name='critic'):
-        cost = tf.reduce_mean(tf.square(self.Y - self.critic))
-
-        model_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=name)
+    def build_value_model(self, name='value'):
         with tf.variable_scope(name):
-            train_op = tf.train.AdamOptimizer(self.critic_lr, beta1=0.5, beta2=0.999).minimize(cost, var_list=model_vars, global_step=self.global_step)
+            inputs = tf.concat([self.states, self.actions], axis=1)
+            model = tf.layers.dense(inputs, self.hidden1_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
+            model = tf.layers.batch_normalization(model)
+            model = tf.nn.tanh(model)
+            model = tf.layers.dense(model, self.hidden2_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
+            model = tf.layers.batch_normalization(model)
+            model = tf.nn.tanh(model)
+            model = tf.layers.dense(model, 1, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
+            model = tf.reshape(model, [-1])
+            return model
 
-        return train_op, cost
+    def normalize_action(self, a):
+        temp_a = 2.0/(self.action_bound_max - self.action_bound_min)
+        temp_b = (self.action_bound_max + self.action_bound_min)/(self.action_bound_min - self.action_bound_max)
+        temp_a = tf.ones_like(a)*temp_a
+        temp_b = tf.ones_like(a)*temp_b
+        return temp_a*a + temp_b
 
-    def _build_update_target_model(self):
+    def unnormalize_action(self, a):
+        temp_a = (self.action_bound_max - self.action_bound_min)/2.0
+        temp_b = (self.action_bound_max + self.action_bound_min)/2.0
+        temp_a = tf.ones_like(a)*temp_a
+        temp_b = tf.ones_like(a)*temp_b
+        return temp_a*a + temp_b
+
+    def build_soft_update_op(self):
         copy_op = []
 
-        main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='actor')
-        target_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='target_actor')
-
-        # 학습 네트웍의 변수의 값들을 타겟 네트웍으로 복사해서 타겟 네트웍의 값들을 최신으로 업데이트합니다.
+        main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/policy')
+        target_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/target_policy')
         for main_var, target_var in zip(main_vars, target_vars):
             copy_op.append(target_var.assign( tf.multiply( main_var.value(), self.soft_update) + tf.multiply( target_var.value(), 1.0 - self.soft_update) ))
 
-        main_vars2 = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='critic')
-        target_vars2 = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='target_critic')
-
-        # 학습 네트웍의 변수의 값들을 타겟 네트웍으로 복사해서 타겟 네트웍의 값들을 최신으로 업데이트합니다.
+        main_vars2 = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/value')
+        target_vars2 = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/target_value')
         for main_var, target_var in zip(main_vars2, target_vars2):
             copy_op.append(target_var.assign( tf.multiply( main_var.value(), self.soft_update) + tf.multiply( target_var.value(), 1.0 - self.soft_update) ))
-
         return copy_op
 
-    def init_target_model(self):
+    def build_init_target_op(self):
         copy_op = []
 
-        main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='actor')
-        target_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='target_actor')
-
-        # 학습 네트웍의 변수의 값들을 타겟 네트웍으로 복사해서 타겟 네트웍의 값들을 최신으로 업데이트합니다.
+        main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='policy')
+        target_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='target_policy')
         for main_var, target_var in zip(main_vars, target_vars):
             copy_op.append(target_var.assign(main_var.value()))
 
-        main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='critic')
-        target_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='target_critic')
-
-        # 학습 네트웍의 변수의 값들을 타겟 네트웍으로 복사해서 타겟 네트웍의 값들을 최신으로 업데이트합니다.
+        main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='value')
+        target_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='target_value')
         for main_var, target_var in zip(main_vars, target_vars):
             copy_op.append(target_var.assign(main_var.value()))
+        return copy_op
 
-        self.sess.run(copy_op)
+    def get_action(self, state, is_train):
+        [action] = self.sess.run(self.sample_action, feed_dict={self.states:[state]})
+        if is_train:
+            action += np.random.normal(action.shape, scale=self.epsilon)
+            #self.action_noise 이용해서도 짜보자
+        action = np.clip(action, self.action_bound_min, self.action_bound_max)
+        return action
 
-    def get_action(self, state):
-        [actions] = self.sess.run(self.actor, feed_dict={self.X:[state]})
-        for i in range(len(actions)):
-            actions[i] += np.random.normal(scale=self.epsilon)
-        actions = np.clip(actions, -self.action_bound, self.action_bound)
-        return actions
+    def get_value(self, state, action):
+        [value] = self.sess.run(self.value, feed_dict={self.states:[state], self.actions:[action]})
+        return value
 
-    def _train(self):
-        '''
-        mini_batch = random.sample(self.replay_memory, self.batch_size)
-
-        states = []
-        actions = []
-        rewards = []
-        dones = []
-        next_states = []
-        for batch in mini_batch:
-            states.append(batch[0])
-            actions.append(batch[1])
-            rewards.append(batch[2])
-            dones.append(batch[3])
-            next_states.append(batch[4])
-        '''
+    def train(self):
         if self.epsilon > self.min_epsilon:
             self.epsilon *= self.epsilon_decay
-        states, actions, rewards, dones, next_states = self.replay_memory.sample_batch(self.batch_size)
 
-        next_actions = self.sess.run(self.target_actor, feed_dict={self.X:next_states})
-        next_Q_value = self.sess.run(self.target_critic, feed_dict={self.X:next_states, self.A:next_actions})
+        mini_batch = random.sample(self.replay_memory, self.batch_size)
+        states = [batch[0] for batch in mini_batch]
+        actions = [batch[1] for batch in mini_batch]
+        next_states = [batch[4] for batch in mini_batch]
 
-        critic_target = []
+        target_actions = self.sess.run(self.target_policy, feed_dict={self.states:next_states})
+        next_values = self.sess.run(self.target_value, feed_dict={self.states:next_states, self.actions:target_actions})
+        actions = self.sess.run(self.norm_action, feed_dict={self.actions:actions})
+        mu_actions = self.sess.run(self.policy, feed_dict={self.states:states})
+
+        targets = []
         for i in range(self.batch_size):
-            if dones[i]:
-                critic_target.append([rewards[i]])
-            else:
-                critic_target.append([rewards[i] + self.discount_factor*next_Q_value[i][0]])
-        Q_loss,_ = self.sess.run([self.Q_loss, self.train_critic_op], feed_dict={self.X:states, self.A :actions, self.Y:critic_target})
+            reward = mini_batch[i][2]
+            done = mini_batch[i][3]
+            #if done:
+            #    targets.append(reward)
+            #else:
+            #    targets.append(reward + self.discount_factor*next_values[i])
+            targets.append(reward + self.discount_factor*next_values[i])
+        _, v_loss = self.sess.run([self.v_train_op, self.v_loss], feed_dict={self.states:states, self.actions:actions, self.targets:targets})
+        _, p_loss = self.sess.run([self.p_train_op, self.p_loss], feed_dict={self.states:states, self.actions:mu_actions})
+        self.sess.run(self.soft_update_op)
 
-        mu_actions = self.sess.run(self.actor, feed_dict={self.X:states})
-        [action_gradient] = self.sess.run(self.action_q_gradient, feed_dict={self.X:states, self.A:mu_actions})
-        self.sess.run(self.train_actor_op, feed_dict={self.X:states, self.Q_Action_Gradient:action_gradient})
+        return v_loss, p_loss
 
-        return Q_loss
-
-    def train(self, episodes=10000):
-        graph = Graph(freq=1000, title='HOPPER', label='DDPG')
-
-        for episode in range(episodes):
-            state = self.env.reset()
-            score = 0
-            done = False
-
-            Q_loss = 0
-            count = 0
-
-            while not done:
-                action = self.get_action(state)# + self.actor_noise()
-                next_state, reward, done, info = self.env.step(action)
-
-                #self.replay_memory.append((state, action, reward, done, next_state))
-                self.replay_memory.add(state, action, reward, done, next_state)
-
-                #if len(self.replay_memory) > self.train_start:
-                if self.replay_memory.size() > self.batch_size:
-                    Q_loss += self._train()
-                    self.sess.run(self.update_target_model)
-                    #print(reward)
-
-                state = next_state
-                score += reward
-                count += 1
-
-            #draw graph
-            graph.update(score, Q_loss/count)
-
-            print("ep : {} | score : {} | epsilon : {} | Q_loss : {:.3f}".format(episode, score, self.epsilon, Q_loss/count))
-            if (episode+1)%self.save_freq == 0:
-                self.save()
-                with open('replay.pkl', 'wb') as f:
-                    pickle.dump(self.replay_memory, f)
-        
-    def test(self):
-        state = self.env.reset()
-        score = 0
-        done = False
-
-        ep_ave_max_q = 0
-        count = 0
-
-        while not done:
-            self.env.render()
-            action = self.get_action(state)
-            next_state, reward, done, info = self.env.step(action)
-
-            time.sleep(0.02)
-            print(next_state[1])
-
-            state = next_state
-            score += reward
-            count += 1
-
-        print(score, ep_ave_max_q/float(count))
-
-    def save(self, checkpoint_dir='checkpoint'):
-        self.saver.save(self.sess, checkpoint_dir+'/'+self.name+'/model.ckpt', global_step=self.global_step)
+    def save(self):
+        self.saver.save(self.sess, self.checkpoint_dir+'/model.ckpt')
+        with open('{}/replay.pkl'.format(self.checkpoint_dir), 'wb') as f:
+            pickle.dump([self.epsilon, self.replay_memory], f)
         print('save 성공!')
 
-    def load(self, checkpoint_dir='checkpoint'):
-        '''
-        self.saver = tf.train.Saver(var_list= tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='actor')\
-            +tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='critic'))
-        '''
+    def load(self):
         self.saver = tf.train.Saver(var_list= tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES))
 
-        if not os.path.isdir(checkpoint_dir+'/'+self.name):
-            os.makedirs(checkpoint_dir+'/'+self.name)
+        if not os.path.isdir(self.checkpoint_dir):
+            os.makedirs(self.checkpoint_dir)
 
-        ckpt = tf.train.get_checkpoint_state(checkpoint_dir+'/'+self.name)
+        ckpt = tf.train.get_checkpoint_state(self.checkpoint_dir)
         if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
             self.saver.restore(self.sess, ckpt.model_checkpoint_path)
+            with open('{}/replay.pkl'.format(self.checkpoint_dir), 'rb') as f:
+                self.epsilon, self.replay_memory = pickle.load(f)
             print('success to load model!')
 
             self.epsilon = self.min_epsilon
@@ -298,25 +222,3 @@ class Agent:
             self.sess.run(tf.global_variables_initializer())
             print('fail to load model...')
         
-    @staticmethod
-    def _arg_max(state_action):
-        max_index_list = []
-        max_value = state_action[0]
-        for index, value in enumerate(state_action):
-            if value > max_value:
-                max_index_list.clear()
-                max_value = value
-                max_index_list.append(index)
-            elif value == max_value:
-                max_index_list.append(index)
-        return random.choice(max_index_list)
-
-
-if __name__ == '__main__':
-    #env = gym.make('HalfCheetah-v2')
-    #env = gym.make('Hopper-v2')
-    #env = gym.make('RoboschoolHopper-v1')
-    env = gym.make('RoboschoolHalfCheetah-v1')
-    agent = Agent(env)
-    #agent.train()
-    agent.test()

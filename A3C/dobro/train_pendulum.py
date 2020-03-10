@@ -25,8 +25,8 @@ import sys
 import gym
 
 env_name = 'Pendulum-v0'
-agent_args = {'hidden1':128,
-            'hidden2':128,
+agent_args = {'hidden1':64,
+            'hidden2':64,
             'v_lr':1e-3,
             'p_lr':1e-4,
             'init_std':0.0}
@@ -34,11 +34,11 @@ agent_args = {'hidden1':128,
 def train():
     global total_step, total_max_step, env_name, global_agent, step_period, gamma, \
             loss_logger, score_logger, graph, p_losses, v_losses, entropies, scores, agent_args
-    gamma = 0.99
+    gamma = 0.9
     num_thread = 10
     total_step = 0
     total_max_step = 1e8
-    step_period = 1e4 #1e4
+    step_period = 1e2 #1e4
     step_period = int(step_period / num_thread)
     save_name = env_name.split('-')[0]
 
@@ -49,10 +49,11 @@ def train():
     graph = Graph(1000, save_name.upper(), 'A3C')
     env.close()
 
-    p_losses = deque(maxlen=step_period)
-    v_losses = deque(maxlen=step_period)
-    entropies = deque(maxlen=step_period)
-    scores = deque(maxlen=step_period)
+    save_period = 1000
+    p_losses = deque(maxlen=save_period)
+    v_losses = deque(maxlen=save_period)
+    entropies = deque(maxlen=save_period)
+    scores = deque(maxlen=save_period)
 
     def thread_func(t_idx):
         global total_step, total_max_step, env_name, global_agent, step_period, gamma, \
@@ -73,6 +74,7 @@ def train():
         actions = []
         rewards = []
         dones =[]
+        next_states = []
 
         score = 0
         state = env.reset()
@@ -81,30 +83,23 @@ def train():
             total_step += 1
 
             action = agent.get_action(state, True)
-            #if action[0] > 0:
-            #    a_t = 1
-            #else :
-            #    a_t = 0
             next_state, reward, done, info = env.step(action)
-            #next_state, reward, done, info = env.step(a_t)
-            ####### modify reward function #######
-            #reward = 200-cnt if done else 0
-            #reward /= 10
-            ####### modify reward function #######
             states.append(state)
             actions.append(action)
             rewards.append(reward)
             dones.append(done)
+            next_states.append(next_state) 
             score += reward
 
             if step-start_step == step_period:
                 ret = 0 if done else agent.get_value(next_state)
                 targets = []
+                state_values = []
                 for i in range(len(states)):
                     if dones[-i-1]:
-                        ret = 0
-                    #elif i > 0:
-                    #    ret = agent.get_value(states[-i])
+                        #ret = 0
+                        ret = agent.get_value(next_states[-i-1])
+                        state_values.append(ret)
                     ret = rewards[-i-1] + gamma*ret
                     targets.append(ret)
                 targets = targets[::-1]
@@ -116,7 +111,7 @@ def train():
                 #loss_logger.write([step-start_step,p_loss,v_loss])
                 agent.update_parameter(global_agent)
                 if t_idx == 0:
-                    graph.update(np.mean(scores), np.mean(p_losses), np.mean(v_losses), np.mean(entropies))
+                    graph.update(np.mean(scores), np.mean(p_losses), [np.mean(v_losses), np.mean(state_values)], np.mean(entropies))
 
                 start_step = step
                 states = []
@@ -158,11 +153,10 @@ def test():
         done = False
 
         while not done:
-            time.sleep(0.1)
             #action = agent.get_action(state, False)
             action = agent.get_action(state, True)
             print(action)
-            time.sleep(0.01)
+            #time.sleep(0.01)
             #if action[0] > 0:
             #    a_t = 1
             #else :
