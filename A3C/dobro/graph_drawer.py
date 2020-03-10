@@ -6,7 +6,7 @@ import time
 
 class ProcessPlotter(object):
     def __init__(self, freq, title, label):
-        max_len = int(5e2)
+        max_len = int(5e3)
         self.x = deque(maxlen=max_len)
         self.y1 = deque(maxlen=max_len)
         self.y2 = deque(maxlen=max_len)

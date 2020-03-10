@@ -25,8 +25,8 @@ import sys
 import gym
 
 env_name = 'Pendulum-v0'
-agent_args = {'hidden1':8,
-            'hidden2':8,
+agent_args = {'hidden1':128,
+            'hidden2':128,
             'v_lr':1e-3,
             'p_lr':1e-4,
             'init_std':0.0}
@@ -37,7 +37,7 @@ def train():
     gamma = 0.99
     num_thread = 10
     total_step = 0
-    total_max_step = 1e7
+    total_max_step = 1e8
     step_period = 1e4 #1e4
     step_period = int(step_period / num_thread)
     save_name = env_name.split('-')[0]
@@ -158,10 +158,11 @@ def test():
         done = False
 
         while not done:
-            print(state)
             time.sleep(0.1)
             #action = agent.get_action(state, False)
             action = agent.get_action(state, True)
+            print(action)
+            time.sleep(0.01)
             #if action[0] > 0:
             #    a_t = 1
             #else :
