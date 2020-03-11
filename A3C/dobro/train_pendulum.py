@@ -28,7 +28,7 @@ env_name = 'Pendulum-v0'
 agent_args = {'hidden1':64,
             'hidden2':64,
             'v_lr':1e-3,
-            'p_lr':1e-4,
+            'p_lr':1e-5,
             'init_std':0.0}
 
 def train():

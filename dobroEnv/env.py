@@ -79,11 +79,16 @@ class Env(gym.Env):
             done = True
         '''
         done = False
-        if self.model.body_contact == 1.0:
-            done = True
+        #if self.model.body_contact == 1.0:
+        #    done = True
 
         electrocity_cost = np.abs(np.multiply(self.model.applied_forces, joint_vel)).mean()
-        reward = base_vel[0] - 5e-4*electrocity_cost
+        #reward = base_vel[0] - 5e-4*electrocity_cost
+        reward = base_vel[0]
+        if self.model.body_contact == 1.0:
+            reward -= 0.1
+        else:
+            reward += 0.1
         #reward = base_vel[0]
         info = {}
 

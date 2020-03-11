@@ -1,6 +1,7 @@
 from collections import deque
 import tensorflow as tf
 import numpy as np
+import itertools
 import pickle
 import random
 import copy
@@ -44,13 +45,14 @@ class Agent:
         self.p_lr = args['p_lr']
         self.soft_update = args['soft_update']
         self.replay_memory = deque(maxlen=int(1e5))
-        self.actor_noise = OUActionNoise(mu=np.zeros(self.action_dim))
 
-        self.train_start = int(1e4)
+        self.train_start = int(1e3)
         self.batch_size = int(1e3)
         self.epsilon = 1.0
         self.epsilon_decay = 0.9999
         self.min_epsilon = 0.01
+        self.se_rate = 0.3
+        self.actor_noise = OUActionNoise(mu=np.zeros(self.action_dim), sigma=self.se_rate*self.epsilon)
 
         with tf.variable_scope(self.name):
             #placeholder
@@ -87,9 +89,6 @@ class Agent:
             #make session and load model
             self.sess = tf.Session()
             self.load()
-
-            #initialize target network
-            self.sess.run(self.init_target_op)
 
     def build_policy_model(self, name='policy'):
         with tf.variable_scope(name):
@@ -146,13 +145,13 @@ class Agent:
     def build_init_target_op(self):
         copy_op = []
 
-        main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='policy')
-        target_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='target_policy')
+        main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/policy')
+        target_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/target_policy')
         for main_var, target_var in zip(main_vars, target_vars):
             copy_op.append(target_var.assign(main_var.value()))
 
-        main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='value')
-        target_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='target_value')
+        main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/value')
+        target_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/target_value')
         for main_var, target_var in zip(main_vars, target_vars):
             copy_op.append(target_var.assign(main_var.value()))
         return copy_op
@@ -160,7 +159,8 @@ class Agent:
     def get_action(self, state, is_train):
         [action] = self.sess.run(self.sample_action, feed_dict={self.states:[state]})
         if is_train:
-            action += np.random.normal(action.shape, scale=self.epsilon)
+            action += np.random.normal(size=action.shape, scale=self.epsilon)
+            #action += self.actor_noise()
             #self.action_noise 이용해서도 짜보자
         action = np.clip(action, self.action_bound_min, self.action_bound_max)
         return action
@@ -172,10 +172,12 @@ class Agent:
     def train(self):
         if self.epsilon > self.min_epsilon:
             self.epsilon *= self.epsilon_decay
+            self.actor_noise.sigma = self.se_rate*self.epsilon
 
         mini_batch = random.sample(self.replay_memory, self.batch_size)
         states = [batch[0] for batch in mini_batch]
         actions = [batch[1] for batch in mini_batch]
+        rewards = [batch[2] for batch in mini_batch]
         next_states = [batch[4] for batch in mini_batch]
 
         target_actions = self.sess.run(self.target_policy, feed_dict={self.states:next_states})
@@ -183,15 +185,21 @@ class Agent:
         actions = self.sess.run(self.norm_action, feed_dict={self.actions:actions})
         mu_actions = self.sess.run(self.policy, feed_dict={self.states:states})
 
+        '''
         targets = []
         for i in range(self.batch_size):
             reward = mini_batch[i][2]
             done = mini_batch[i][3]
-            #if done:
-            #    targets.append(reward)
-            #else:
-            #    targets.append(reward + self.discount_factor*next_values[i])
-            targets.append(reward + self.discount_factor*next_values[i])
+            if done:
+                targets.append(reward)
+            else:
+                targets.append(reward + self.discount_factor*next_values[i])
+        '''
+        targets = np.array(rewards) + self.discount_factor*next_values
+        #a = itertools.islice(self.replay_memory, len(self.replay_memory)-100, len(self.replay_memory))
+        #r = [batch[2] for batch in a]
+        #print(np.mean(targets),np.mean(next_values), np.mean(rewards), np.mean(r))
+
         _, v_loss = self.sess.run([self.v_train_op, self.v_loss], feed_dict={self.states:states, self.actions:actions, self.targets:targets})
         _, p_loss = self.sess.run([self.p_train_op, self.p_loss], feed_dict={self.states:states, self.actions:mu_actions})
         self.sess.run(self.soft_update_op)
@@ -215,10 +223,11 @@ class Agent:
             self.saver.restore(self.sess, ckpt.model_checkpoint_path)
             with open('{}/replay.pkl'.format(self.checkpoint_dir), 'rb') as f:
                 self.epsilon, self.replay_memory = pickle.load(f)
+                self.actor_noise.sigma = self.se_rate*self.epsilon
             print('success to load model!')
-
-            self.epsilon = self.min_epsilon
         else:
             self.sess.run(tf.global_variables_initializer())
+            #initialize target network
+            self.sess.run(self.init_target_op)
             print('fail to load model...')
         

@@ -12,6 +12,7 @@ rc('font', **font)
 
 #env_name = 'MountainCarContinuous'
 env_name = 'Pendulum'
+#env_name = 'DobroHalfCheetah'
 item_name = 'score'
 #item_name = 'loss'
 moving_period = 20
