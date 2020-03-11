@@ -6,11 +6,12 @@ import time
 
 class ProcessPlotter(object):
     def __init__(self, freq, title, label):
-        max_len = int(5e2)
+        max_len = int(5e3)
         self.x = deque(maxlen=max_len)
         self.y1 = deque(maxlen=max_len)
         self.y2 = deque(maxlen=max_len)
-        self.y3 = deque(maxlen=max_len)
+        self.y3_0 = deque(maxlen=max_len)
+        self.y3_1 = deque(maxlen=max_len)
         self.y4 = deque(maxlen=max_len)
         self.interval = freq
         self.title = title
@@ -29,11 +30,13 @@ class ProcessPlotter(object):
                 self.x.append(command[0])
                 self.y1.append(command[1])
                 self.y2.append(command[2])
-                self.y3.append(command[3])
+                self.y3_0.append(command[3][0])
+                self.y3_1.append(command[3][1])
                 self.y4.append(command[4])
         del self.ax.lines[-1]
         del self.ax2.lines[-1]
-        del self.ax3.lines[-1]
+        for i in range(len(self.ax3.lines)):
+            del self.ax3.lines[0]
         del self.ax4.lines[-1]
         if len(self.x) == 0:
             lower, upper = 0, 0
@@ -43,7 +46,8 @@ class ProcessPlotter(object):
         self.ax.set_xlim(lower, upper)
         self.ax2.plot(self.x, self.y2, 'b')
         self.ax2.set_xlim(lower, upper)
-        self.ax3.plot(self.x, self.y3, 'g')
+        self.ax3.plot(self.x, self.y3_0, 'g')
+        self.ax3.plot(self.x, self.y3_1, 'black')
         self.ax3.set_xlim(lower, upper)
         self.ax4.plot(self.x, self.y4, 'y')
         self.ax4.set_xlim(lower, upper)

@@ -18,6 +18,7 @@ from logger import Logger
 from collections import deque
 import tensorflow as tf
 import numpy as np
+import threading
 import random
 import pickle
 import copy
@@ -42,6 +43,8 @@ class Agent:
         self.p_lr = args['p_lr']
         self.init_std = args['init_std']
 
+        self.lock = threading.Lock()
+
         with tf.variable_scope(self.name):
             #placeholder
             self.states = tf.placeholder(tf.float32, [None, self.state_dim], name='State')
@@ -51,11 +54,11 @@ class Agent:
             #action & value
             self.mean, self.std = self.build_policy_model('policy')
             self.value = self.build_value_model('value')
-            self.norm_noise_action = self.mean + tf.random_normal(tf.shape(self.mean))*self.std
+            self.norm_noise_action = self.mean + tf.multiply(tf.random_normal(tf.shape(self.mean)), self.std)
             self.sample_noise_action = self.unnormalize_action(self.norm_noise_action)
             self.norm_action = self.mean
             self.sample_action = self.unnormalize_action(self.norm_action)
-            self.entropy = tf.reduce_mean(self.std + 0.5 + 0.5*np.log(2*np.pi))
+            self.entropy = tf.reduce_mean(tf.log(self.std + 1e-10) + 0.5 + 0.5*np.log(2*np.pi))
 
             #policy loss
             norm_actions = self.normalize_action(self.actions)
@@ -84,14 +87,16 @@ class Agent:
         with tf.variable_scope(name):
             model = tf.layers.dense(self.states, self.hidden1_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
             model = tf.layers.batch_normalization(model)
-            model = tf.nn.tanh(model)
-            model = tf.layers.dense(model, self.hidden2_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            model = tf.layers.batch_normalization(model)
-            model = tf.nn.tanh(model)
+            #model = tf.nn.tanh(model)
+            model = tf.nn.relu(model)
+            #model = tf.layers.dense(model, self.hidden2_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
+            #model = tf.layers.batch_normalization(model)
+            #model = tf.nn.tanh(model)
 
             mean = tf.layers.dense(model, self.action_dim, activation=tf.tanh, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
             logits_std = tf.get_variable("logits_std",shape=(self.action_dim),initializer=tf.random_normal_initializer(mean=self.init_std, stddev=0.02)) # 0.1정도로 initialize
-            std = tf.ones_like(mean)*tf.nn.softplus(logits_std)
+            #std = tf.ones_like(mean)*tf.nn.softplus(logits_std)
+            std = tf.ones_like(mean)*tf.nn.sigmoid(logits_std)
             #std = 0.1
         return mean, std
 
@@ -99,11 +104,12 @@ class Agent:
         with tf.variable_scope(name):
             model = tf.layers.dense(self.states, self.hidden1_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
             model = tf.layers.batch_normalization(model)
-            model = tf.nn.tanh(model)
-            model = tf.layers.dense(model, self.hidden2_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            model = tf.layers.batch_normalization(model)
-            model = tf.nn.tanh(model)
-            model = tf.layers.dense(model, self.hidden2_units, activation=tf.nn.tanh, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
+            #model = tf.nn.tanh(model)
+            model = tf.nn.relu(model)
+            #model = tf.layers.dense(model, self.hidden2_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
+            #model = tf.layers.batch_normalization(model)
+            #model = tf.nn.tanh(model)
+            #model = tf.layers.dense(model, self.hidden2_units, activation=tf.nn.tanh, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
             model = tf.layers.dense(model, 1, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
             model = tf.reshape(model, [-1])
             return model
@@ -170,16 +176,16 @@ class Agent:
 
 if __name__ == "__main__":
     env_name = 'Pendulum-v0'
-    agent_args = {'hidden1':128,
-                'hidden2':128,
+    agent_args = {'hidden1':64,
+                'hidden2':64,
                 'v_lr':1e-3,
                 'p_lr':1e-4,
                 'init_std':0.0}
-    gamma = 0.99
+    gamma = 0.9
     save_name = env_name.split('-')[0]
-    episodes = 10
-    value_epoch = 20
-    policy_epoch = 10
+    episodes = 1
+    value_epoch = 10
+    policy_epoch = 1
     iters = int(1e4)
 
     env = gym.make(env_name)
@@ -191,6 +197,7 @@ if __name__ == "__main__":
     print_period = 100
     p_losses = deque(maxlen=print_period)
     v_losses = deque(maxlen=print_period)
+    value_list = deque(maxlen=print_period)
     entropies = deque(maxlen=print_period)
     scores = deque(maxlen=episodes*print_period)
 
@@ -199,6 +206,7 @@ if __name__ == "__main__":
         actions = []
         rewards = []
         dones =[]
+        next_states = []
         for episode in range(episodes):
             score = 0
             state = env.reset()
@@ -209,16 +217,19 @@ if __name__ == "__main__":
                 actions.append(action)
                 rewards.append(reward)
                 dones.append(done)
+                next_states.append(next_state) 
                 score += reward
-
-                if done: break
+                if done:
+                    break
                 state = next_state
             scores.append(score)
 
         targets = []
         for i in range(len(states)):
             if dones[-i-1]:
-                ret = 0
+                #ret = 0
+                ret = agent.get_value(next_states[-i-1])
+                value_list.append(ret)
             ret = rewards[-i-1] + gamma*ret
             targets.append(ret)
         targets = targets[::-1]
@@ -229,7 +240,7 @@ if __name__ == "__main__":
         p_losses.append(p_loss)
         v_losses.append(v_loss)
         entropies.append(entropy)
-        graph.update(np.mean(scores), np.mean(p_losses), np.mean(v_losses), np.mean(entropies))
+        graph.update(np.mean(scores), np.mean(p_losses), [np.mean(v_losses), np.mean(value_list)], np.mean(entropies))
         if (total_iter+1)%10 == 0:
             print(np.mean(scores))
             agent.save()

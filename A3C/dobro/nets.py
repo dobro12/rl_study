@@ -90,9 +90,10 @@ class Agent:
             model = tf.nn.tanh(model)
 
             mean = tf.layers.dense(model, self.action_dim, activation=tf.tanh, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            #logits_std = tf.get_variable("logits_std",shape=(self.action_dim),initializer=tf.random_normal_initializer(mean=self.init_std, stddev=0.02)) # 0.1정도로 initialize
+            logits_std = tf.get_variable("logits_std",shape=(self.action_dim),initializer=tf.random_normal_initializer(mean=self.init_std, stddev=0.02)) # 0.1정도로 initialize
             #std = tf.ones_like(mean)*tf.nn.softplus(logits_std)
-            std = self.init_std
+            std = tf.ones_like(mean)*tf.nn.sigmoid(logits_std)
+            #std = 0.1
         return mean, std
 
     def build_value_model(self, name='value'):

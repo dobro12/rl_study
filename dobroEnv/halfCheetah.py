@@ -86,7 +86,7 @@ class HalfCheetah(object):
         if len(self.action) == 0:
             self.action = action
         else:
-            w = 0.9
+            w = 0.5
             self.action = w*self.action + (1-w)*action
             action = self.action
         Kp = 500
