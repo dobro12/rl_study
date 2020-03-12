@@ -113,8 +113,8 @@ def test():
         done = False
 
         while not done:
-            #action = agent.get_action(state, False)
-            action = agent.get_action(state, True)
+            action = agent.get_action(state, False)
+            #action = agent.get_action(state, True)
             state, reward, done, info = env.step(action)
             print(np.mean(action))
             env.render()
