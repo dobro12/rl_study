@@ -6,12 +6,7 @@ def soft_update(target, source, tau=1e-3):
 
 
 class OrnsteinUhlenbeckProcess():
-    def __init__(self, args, dt=1e-4, x0=None, sigma_min=None, n_steps_annealing=1000):
-        theta = args.theta
-        mu = args.mu
-        sigma = args.sigma
-        size = args.action_dim
-
+    def __init__(self, theta, mu, sigma, dt=1e-4, x0=None, size=1, sigma_min=None, n_steps_annealing=1000):
         self.mu = mu
         self.sigma = sigma
         self.n_steps = 0
