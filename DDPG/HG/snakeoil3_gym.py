@@ -53,8 +53,6 @@
 # Try `snakeoil.py --help` to get started.
 
 # for Python3-based torcs python robot client
-from __future__ import print_function
-from __future__ import division
 import socket
 import sys
 import getopt
@@ -155,12 +153,12 @@ class Client():
         n_fail = 5
         while True:
             # This string establishes track sensor angles! You can customize them.
-            a= "-90 -75 -60 -45 -30 -20 -15 -10 -5 0 5 10 15 20 30 45 60 75 90"
+            #a= "-90 -75 -60 -45 -30 -20 -15 -10 -5 0 5 10 15 20 30 45 60 75 90"
             # xed- Going to try something a bit more aggressive...
-            #a= "-45 -19 -12 -7 -4 -2.5 -1.7 -1 -.5 0 .5 1 1.7 2.5 4 7 12 19 45"
+            a= "-45 -19 -12 -7 -4 -2.5 -1.7 -1 -.5 0 .5 1 1.7 2.5 4 7 12 19 45"
 
             initmsg='%s(init %s)' % (self.sid,a)
-            #print('Sending to server: %s' %(initmsg))
+
             try:
                 self.so.sendto(initmsg.encode(), (self.host, self.port))
             except socket.error as emsg:
@@ -168,8 +166,7 @@ class Client():
             sockdata= str()
             try:
                 sockdata,addr= self.so.recvfrom(data_size)
-                print('Received from server: %s' % (sockdata))
-                #sockdata = sockdata.decode('utf-8')
+                sockdata = sockdata.decode('utf-8')
             except socket.error as emsg:
                 print("Waiting for server on %d............" % self.port)
                 print("Count Down : " + str(n_fail))
@@ -235,7 +232,6 @@ class Client():
 
     def get_servers_input(self):
         '''Server's input is stored in a ServerState object'''
-        #print('inside server input')
         if not self.so: return
         sockdata= str()
 
@@ -243,19 +239,12 @@ class Client():
             try:
                 # Receive server data
                 sockdata,addr= self.so.recvfrom(data_size)
-                #print(sockdata)
-                #sockdata = sockdata.decode('utf-8')
+                sockdata = sockdata.decode('utf-8')
             except socket.error as emsg:
                 print('.', end=' ')
                 #print "Waiting for data on %d.............." % self.port
-            #if 'angle' in sockdata:
-            #    self.S.parse_server_str(sockdata)
-            #    if self.debug:
-            #        sys.stderr.write("\x1b[2J\x1b[H") # Clear for steady output.
-            #        print(self.S)
-            #    break # Can now return from this function.
             if '***identified***' in sockdata:
-                print("[get_server_input_]Client connected on %d.............." % self.port)
+                print("Client connected on %d.............." % self.port)
                 continue
             elif '***shutdown***' in sockdata:
                 print((("Server has stopped the race on %d. "+
@@ -310,8 +299,8 @@ class ServerState():
         sslisted= self.servstr.strip().lstrip('(').rstrip(')').split(')(')
         for i in sslisted:
             w= i.split(' ')
-            temp = destringify(w[1:])
-            self.d[w[0]]= temp
+            self.d[w[0]]= destringify(w[1:])
+
     def __repr__(self):
         # Comment the next line for raw output:
         return self.fancyout()
@@ -544,8 +533,6 @@ def drive_example(c):
     target_speed=100
 
     # Steer To Corner
-    #print(R['steer'])
-    #print(S['angle']*10)
     R['steer']= S['angle']*10 / PI
     # Steer To Center
     R['steer']-= S['trackPos']*.10
@@ -579,9 +566,9 @@ def drive_example(c):
 
 # ================ MAIN ================
 if __name__ == "__main__":
-    C= Client(p=3100)
-    #for step in range(C.maxSteps,0,-1):
-    #    C.get_servers_input()
-    #    drive_example(C)
-    #    C.respond_to_server()
-    #C.shutdown()
+    C= Client(p=3001)
+    for step in range(C.maxSteps,0,-1):
+        C.get_servers_input()
+        drive_example(C)
+        C.respond_to_server()
+    C.shutdown()

@@ -31,12 +31,16 @@ class ActorNet(nn.Module):
         
         self.actor_layer = nn.Sequential(
             nn.Linear(state_dim, num_hidden1),
+            nn.BatchNorm1d(num_hidden1),
             nn.ReLU(),
             nn.Linear(num_hidden1, num_hidden2),
+            nn.BatchNorm1d(num_hidden2),
             nn.ReLU(),
             nn.Linear(num_hidden2, num_hidden3),
+            nn.BatchNorm1d(num_hidden3),
             nn.ReLU(),
-            nn.Linear(num_hidden3, action_dim)
+            nn.Linear(num_hidden3, action_dim),
+            nn.Tanh()
         )
     
     def forward(self, x):
@@ -52,19 +56,41 @@ class CriticNet(nn.Module):
         num_hidden2 = args.hidden2
         num_hidden3 = args.hidden3
         
+        self.fc_s1 = nn.Linear(state_dim, num_hidden1)
+        self.fc_a1 = nn.Linear(action_dim, num_hidden1)
+        self.fc2 = nn.Linear(2*num_hidden1, num_hidden2)
+        self.fc3 = nn.Linear(num_hidden2, num_hidden3)
+        self.fc4 = nn.Linear(num_hidden3, 1)
+        self.bn_s1 = nn.BatchNorm1d(num_hidden1)
+        self.bn_a1 = nn.BatchNorm1d(num_hidden1)
+        self.bn2 = nn.BatchNorm1d(num_hidden2)
+        self.bn3 = nn.BatchNorm1d(num_hidden3)
+        '''
         self.critic_layer = nn.Sequential(
             nn.Linear(state_dim+action_dim, num_hidden1),
+            nn.BatchNorm1d(num_hidden1),
             nn.ReLU(),
             nn.Linear(num_hidden1, num_hidden2),
+            nn.BatchNorm1d(num_hidden2),
             nn.ReLU(),
             nn.Linear(num_hidden2, num_hidden3),
+            nn.BatchNorm1d(num_hidden3),
             nn.ReLU(),
             nn.Linear(num_hidden3, 1)
         )
+        '''
         
     def forward(self, state, action):
-        x = torch.cat([state, action], dim=-1)
-        return self.critic_layer(x)
+        #x = torch.cat([state, action], dim=-1)
+        #return self.critic_layer(x)
+        x_s = F.relu(self.bn_s1(self.fc_s1(state)))
+        x_a = F.relu(self.bn_a1(self.fc_a1(action)))
+        x = torch.cat([x_s, x_a], dim=-1)
+        x = F.relu(self.bn2(self.fc2(x)))
+        x = F.relu(self.bn3(self.fc3(x)))
+        x = self.fc4(x)
+        return x
+
 
 def sample_minibatch(R, args):
     batch_size = args.batch_size
@@ -89,8 +115,8 @@ if __name__=='__main__':
     parser.add_argument('--action_dim', default=2, type=int)
     parser.add_argument('--hidden1', default=128, type=int)
     parser.add_argument('--hidden2', default=128, type=int)
-    parser.add_argument('--hidden3', default=128, type=int)
-    parser.add_argument('--actor_lr', default=1e-4, type=float)
+    parser.add_argument('--hidden3', default=64, type=int)
+    parser.add_argument('--actor_lr', default=5e-4, type=float)
     parser.add_argument('--critic_lr', default=1e-3, type=float)
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--tau', default=1e-3, type=float)
@@ -100,7 +126,7 @@ if __name__=='__main__':
     parser.add_argument('--decay_rate', default=0.99, type=float)
     parser.add_argument('--gamma', default=0.99, type=float)
     parser.add_argument('--print_freq', default=1, type=int)
-    parser.add_argument('--cuda', default=1, type=int)
+    parser.add_argument('--cuda', default=0, type=int)
     parser.add_argument('--theta', default=0.15, type=float)
     parser.add_argument('--mu', default=0., type=float)
     parser.add_argument('--sigma', default=0.2, type=float)
@@ -150,7 +176,7 @@ if __name__=='__main__':
     actor_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=actor_optim, gamma=args.decay_rate)
 
     # training log
-    fignum = len([f for f in os.listdir() if 'DDPG_halfcheetah' in f and 'png' in f])
+    fignum = len([f for f in os.listdir('graphs/') if 'DDPG_torcs' in f and 'png' in f])
     log_actor_loss = []
     log_critic_loss = []
     log_total_loss = []
@@ -161,6 +187,35 @@ if __name__=='__main__':
     R = []
     ridx = 0
     env = TorcsEnv(vision=vision, throttle=True, gear_change=False)
+
+    '''
+    ### TEST ###
+    env.reset()
+    print('env initialized!!')
+    for i in range(10000):
+        print(i)
+        client = env.client
+
+        u = env.action_space.sample()
+        print(u)
+        this_action = env.agent_to_torcs(u)
+        print(this_action)
+        print()
+
+        # Apply Action
+        action_torcs = client.R.d
+
+        # Steering
+        action_torcs['steer'] = this_action['steer']  # in [-1, 1]
+        # Apply the Agent's action into torcs
+        client.respond_to_server()
+        # Get the response of TORCS
+        client.get_servers_input()
+
+        env.step(env.action_space.sample(), is_training=False)
+    exit()
+    ### TEST ###
+    '''
 
     for ne in range(args.num_episodes):
         # init random process N
@@ -184,17 +239,19 @@ if __name__=='__main__':
         time_step = 0
         while not done:
             time_step += 1
-            state = torch.tensor(obs.astype(np.float32))
+            state = torch.tensor(obs.astype(np.float32)).unsqueeze(0)
+            anet.eval()
             if args.cuda:
                 state = state.cuda()
-                a = anet(state).cpu().detach().numpy()
+                [a] = anet(state).cpu().detach().numpy()
             else:
-                a = anet(state).detach().numpy()
+                [a] = anet(state).detach().numpy()
             noise = random_process.sample()
             action = a + noise
+            anet.train()
 
             pre_obs = obs
-            ob, reward, done, _ = env.step(action)
+            ob, reward, done, _ = env.step(action, is_training=True)
             obs = np.hstack((ob.angle, ob.track, ob.trackPos, ob.speedX, ob.speedY,  ob.speedZ, ob.wheelSpinVel/100.0, ob.rpm))
             ep_return += reward
             
@@ -233,8 +290,8 @@ if __name__=='__main__':
                 ep_a_loss.append(actor_loss.detach().numpy())
 
             # update target_anet, target_cnet
-            soft_update(target_cnet, cnet, tau=tau)
-            soft_update(target_anet, anet, tau=tau)
+            soft_update(target_cnet, cnet, tau=args.tau)
+            soft_update(target_anet, anet, tau=args.tau)
             
         ep_c_loss = np.mean(ep_c_loss)
         ep_a_loss = np.mean(ep_a_loss)
@@ -273,7 +330,7 @@ if __name__=='__main__':
             axes[1].set_title('Total Loss')
             axes[2].set_title('Critic Loss')
             axes[3].set_title('Actor Loss')
-            plt.savefig('DDPG_torch_%d.png'%fignum)
+            plt.savefig('graphs/DDPG_torcs_%d.png'%fignum)
             
             
             raw_data = ['%.1f%%'%((ne+1)/args.num_episodes*100), int(ne+1), ep_loss, ep_return, actor_optim.param_groups[0]['lr']]
