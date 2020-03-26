@@ -37,11 +37,11 @@ def train():
     p_loss_logger = Logger(save_name, 'p_loss')
     score_logger = Logger(save_name, 'score')
     graph = Graph(1000, save_name.upper(), agent.name)
-    episodes = 5
-    epochs = int(1e3)
+    episodes = 10
+    epochs = int(1e5)
     save_freq = 10
 
-    save_period = 1000
+    save_period = 100
     p_losses = deque(maxlen=save_period)
     v_losses = deque(maxlen=save_period)
     entropies = deque(maxlen=save_period)
@@ -84,6 +84,7 @@ def train():
         v_losses.append(v_loss)
         entropies.append(kl)
 
+        print(v_loss, p_objective, kl)
         graph.update(np.mean(scores), np.mean(p_losses), np.mean(v_losses), np.mean(entropies))
         if (epoch+1)%save_freq == 0:
             agent.save()

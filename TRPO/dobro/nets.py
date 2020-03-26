@@ -58,8 +58,9 @@ class Agent:
             self.v_train_op = v_optimizer.apply_gradients(zip(self.v_gradients, v_vars))
 
             #policy optimizer
+            norm_actions = self.normalize_action(self.actions)
             p_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/policy')
-            log_objective = - tf.reduce_sum(np.log(self.std) + 0.5*np.log(2*np.pi) + tf.squared_difference(self.actions, self.mean) / (2 * self.std**2), axis=1)
+            log_objective = - tf.reduce_sum(np.log(self.std) + 0.5*np.log(2*np.pi) + tf.squared_difference(norm_actions, self.mean) / (2 * self.std**2), axis=1)
             log_objective = tf.reduce_mean(log_objective * (self.targets - self.value))
             self.g = tf.gradients(log_objective, p_vars)
             self.g = tf.concat([tf.reshape(g, [-1]) for g in self.g], axis=0)
@@ -73,7 +74,7 @@ class Agent:
             self.J = tf.stack(J, axis=0)
             self.A = tf.matmul(tf.transpose(self.J), self.J) / (self.std**2) 
 
-            objective = (tf.squared_difference(self.old_mean, self.actions) - tf.squared_difference(self.mean, self.actions))/(2*self.std**2)
+            objective = (tf.squared_difference(self.old_mean, norm_actions) - tf.squared_difference(self.mean, norm_actions))/(2*self.std**2)
             self.objective = tf.reduce_mean(tf.exp(tf.reduce_sum(objective, axis=1)) * (self.targets - self.value))
             kl = tf.reduce_sum(0.5*tf.square((self.mean - self.old_mean)/self.std),axis=1)
             self.kl = tf.reduce_mean(kl)
@@ -164,21 +165,23 @@ class Agent:
         actions = trajs[1]
         rewards = trajs[2]
         next_states = trajs[3]
-        next_values, old_means = self.sess.run([self.value, self.mean], feed_dict={self.states:next_states})
+        old_means = self.sess.run(self.mean, feed_dict={self.states:states})
+        next_values = self.sess.run(self.value, feed_dict={self.states:next_states})
         targets = np.array(rewards) + self.discount_factor*next_values
 
-        num_batches = len(states) // self.batch_size
-
         #VALUE update
+        num_batches = len(states) // self.batch_size
+        v_s, v_t = shuffle(states, targets, random_state=0)
         for _ in range(self.value_epochs):
-            states, actions, targets, old_means = shuffle(states, actions, targets, old_means, random_state=0)
+            v_s, v_t = shuffle(v_s, v_t, random_state=0)
             for j in range(num_batches): 
                 start = j * self.batch_size
                 end = (j + 1) * self.batch_size
                 self.sess.run(self.v_train_op, feed_dict={
-                    self.states:states[start:end], 
-                    self.targets:targets[start:end]})
-        #print("value!!")
+                    self.states:v_s[start:end], 
+                    self.targets:v_t[start:end]})
+        next_values = self.sess.run(self.value, feed_dict={self.states:next_states})
+        targets = np.array(rewards) + self.discount_factor*next_values
 
         #POLICY update
         #states, actions, targets, old_means = shuffle(states, actions, targets, old_means, random_state=0)
@@ -217,8 +220,7 @@ class Agent:
 
         #line search
         xAx = np.inner(x_value, np.matmul(A, x_value))
-        if xAx < 0.01:
-            xAx = 0.01
+        xAx = np.clip(np.inner(x_value, np.matmul(A, x_value)), 1e-2, np.inf)
         beta = np.sqrt(2*self.delta / xAx)
         if np.isnan(beta):
             print(x_value)
@@ -226,8 +228,13 @@ class Agent:
             raise ValueError("beta is NaN!")
         init_theta = self.sess.run(self.flatten_p_vars)
         max_objective = None
-        #while True:
-        for i in range(self.max_decay_num):
+        max_theta = None
+        max_kl = None
+        cnt = 0
+
+        #for i in range(self.max_decay_num):
+        while True:
+            cnt += 1
             theta = beta*x_value + init_theta
             self.sess.run(self.assign_op, feed_dict={self.params:theta})
             kl, objective = self.sess.run([self.kl, self.objective], feed_dict={
@@ -238,19 +245,28 @@ class Agent:
             if max_objective == None:
                 if kl <= self.delta:
                     max_objective = objective
+                    max_theta = deepcopy(theta)
+                    max_kl = kl
             else:
                 if kl > self.delta:
                     break
-                if max_objective > objective:
+                if max_objective > objective + 0.1:
                     break
-                max_objective = objective                    
-            old_theta = theta
+                if max_objective < objective:
+                    max_objective = objective                    
+                    max_theta = deepcopy(theta)
+                    max_kl = kl
+            if cnt > self.max_decay_num and max_objective != None:
+                break
             beta *= self.line_decay
-        #print("line search!!")
-        self.sess.run(self.assign_op, feed_dict={self.params:old_theta})
+        #if max_objective == None:
+        #    max_objective = objective
+        #    max_theta = deepcopy(theta)
+        #    max_kl = kl
+        self.sess.run(self.assign_op, feed_dict={self.params:max_theta})
 
         v_loss = self.sess.run(self.v_loss, feed_dict={self.states:states, self.targets:targets})
-        return v_loss, objective, kl
+        return v_loss, max_objective, max_kl
 
 
     def conjugate_gradient_method(self, A, g):
@@ -260,12 +276,7 @@ class Agent:
         rs_old = np.inner(residue, residue)
         for i in range(self.num_conjugate):
             Ap = np.matmul(A, p_vector)
-            #print(i, np.inner(p_vector, Ap))
-            #alpha = rs_old / (1e-10 + np.inner(p_vector, Ap))
-            #alpha = np.clip(rs_old / (1e-10 + np.inner(p_vector, Ap)), -100, 100)
-            pAp = np.inner(p_vector, Ap)
-            if pAp < 0.01:
-                pAp = 0.01
+            pAp = np.clip(np.inner(p_vector, Ap), 1e-2, np.inf)
             alpha = rs_old / pAp
             x_value += alpha * p_vector
             residue -= alpha * Ap
@@ -273,7 +284,6 @@ class Agent:
             if np.sqrt(rs_new) < 1e-5:
                 break
             p_vector = residue + (rs_new / (1e-10 + rs_old)) * p_vector
-            #p_vector = np.clip(residue + (rs_new / (1e-10 + rs_old)) * p_vector, -100, 100)
             rs_old = rs_new
         return x_value
 
@@ -330,3 +340,4 @@ if __name__ == "__main__":
 
     trajs = [states, actions, rewards, next_states]
     agent.train(trajs)
+
