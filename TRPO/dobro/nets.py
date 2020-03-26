@@ -29,6 +29,7 @@ class Agent:
         self.num_conjugate = 10
         self.delta = 0.01
         self.line_decay = 0.5
+        self.max_decay_num = 100
 
         with tf.variable_scope(self.name):
             #placeholder
@@ -184,14 +185,14 @@ class Agent:
         #for j in range(num_batches): 
         #    start = j * self.batch_size
         #    end = (j + 1) * self.batch_size
-        #A, g = self.sess.run([self.A, self.g], feed_dict={
-        J, g = self.sess.run([self.J, self.g], feed_dict={
+        #J, g = self.sess.run([self.J, self.g], feed_dict={
+        A, g = self.sess.run([self.A, self.g], feed_dict={
             self.states:states,
             self.actions:actions,
             self.targets:targets})
         #for i, cond in enumerate(abs(J[0]) < 0.01):
         #    if cond: J[0,i] = 0.0
-        A = np.dot(J.T, J)
+        #A = np.dot(J.T, J)
 
         '''
         strs = "["
@@ -215,7 +216,10 @@ class Agent:
         #print("conjugate!!")
 
         #line search
-        beta = np.sqrt(2*self.delta / (1e-10 + np.inner(x_value, np.matmul(A, x_value))))
+        xAx = np.inner(x_value, np.matmul(A, x_value))
+        if xAx < 0.01:
+            xAx = 0.01
+        beta = np.sqrt(2*self.delta / xAx)
         if np.isnan(beta):
             print(x_value)
             print(np.inner(x_value, np.matmul(A, x_value)))
@@ -223,7 +227,7 @@ class Agent:
         init_theta = self.sess.run(self.flatten_p_vars)
         max_objective = None
         #while True:
-        for i in range(100):
+        for i in range(self.max_decay_num):
             theta = beta*x_value + init_theta
             self.sess.run(self.assign_op, feed_dict={self.params:theta})
             kl, objective = self.sess.run([self.kl, self.objective], feed_dict={
@@ -246,7 +250,7 @@ class Agent:
         self.sess.run(self.assign_op, feed_dict={self.params:old_theta})
 
         v_loss = self.sess.run(self.v_loss, feed_dict={self.states:states, self.targets:targets})
-        return v_loss, max_objective, kl
+        return v_loss, objective, kl
 
 
     def conjugate_gradient_method(self, A, g):
@@ -258,14 +262,18 @@ class Agent:
             Ap = np.matmul(A, p_vector)
             #print(i, np.inner(p_vector, Ap))
             #alpha = rs_old / (1e-10 + np.inner(p_vector, Ap))
-            alpha = np.clip(rs_old / (1e-10 + np.inner(p_vector, Ap)), -100, 100)
+            #alpha = np.clip(rs_old / (1e-10 + np.inner(p_vector, Ap)), -100, 100)
+            pAp = np.inner(p_vector, Ap)
+            if pAp < 0.01:
+                pAp = 0.01
+            alpha = rs_old / pAp
             x_value += alpha * p_vector
             residue -= alpha * Ap
             rs_new = np.inner(residue, residue)
             if np.sqrt(rs_new) < 1e-5:
                 break
-            #p_vector = residue + (rs_new / (1e-10 + rs_old)) * p_vector
-            p_vector = np.clip(residue + (rs_new / (1e-10 + rs_old)) * p_vector, -100, 100)
+            p_vector = residue + (rs_new / (1e-10 + rs_old)) * p_vector
+            #p_vector = np.clip(residue + (rs_new / (1e-10 + rs_old)) * p_vector, -100, 100)
             rs_old = rs_new
         return x_value
 

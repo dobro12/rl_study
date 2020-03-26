@@ -22,8 +22,8 @@ save_name = env_name.split('-')[0]
 agent_args = {'agent_name':'TRPO',
             'env_name':save_name,
             'discount_factor':0.9,
-            'hidden1':1,
-            'hidden2':1,
+            'hidden1':32,
+            'hidden2':32,
             'v_lr':1e-3,
             'batch_size':128,
             'std':1.0}
@@ -37,7 +37,7 @@ def train():
     p_loss_logger = Logger(save_name, 'p_loss')
     score_logger = Logger(save_name, 'score')
     graph = Graph(1000, save_name.upper(), agent.name)
-    episodes = 1
+    episodes = 5
     epochs = int(1e3)
     save_freq = 10
 
