@@ -21,12 +21,12 @@ env_name = 'CartPole-v1'
 save_name = env_name.split('-')[0]
 agent_args = {'agent_name':'TRPO',
             'env_name':save_name,
-            'discount_factor':0.9,
+            'discount_factor':0.99,
             'hidden1':32,
             'hidden2':32,
             'v_lr':1e-3,
-            'batch_size':128,
-            'std':0.01}
+            'std':0.1,
+            'delta':0.01}
 
 def train():
     global env_name, save_name, agent_args
@@ -50,9 +50,6 @@ def train():
     for epoch in range(epochs):
         states = []
         actions = []
-        rewards = []
-        dones = []
-        next_states = []
         targets = []
         ep_step = 0
         for episode in range(episodes):
@@ -64,7 +61,7 @@ def train():
             while not done:
                 step += 1
                 ep_step += 1
-                action = agent.get_action(state, True)
+                action, clipped_action = agent.get_action(state, True)
                 if action > 0:
                     a_t = 1
                 else:
@@ -74,13 +71,7 @@ def train():
 
                 states.append(state)
                 actions.append(action)
-                rewards.append(reward)
                 temp_rewards.append(reward)
-                if step >= 500:
-                    dones.append(False)
-                else:
-                    dones.append(done)
-                next_states.append(next_state)
 
                 state = next_state
                 score += reward
@@ -94,7 +85,7 @@ def train():
                 temp_targets[t] = ret
             targets += list(temp_targets)
 
-        trajs = [states, actions, rewards, next_states, dones, targets]
+        trajs = [states, actions, targets]
         v_loss, p_objective, kl = agent.train(trajs)
 
         v_loss_logger.write([ep_step, v_loss])

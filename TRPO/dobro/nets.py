@@ -28,14 +28,14 @@ class Agent:
         self.hidden1_units = args['hidden1']
         self.hidden2_units = args['hidden2']
         self.v_lr = args['v_lr']
-        self.batch_size = args['batch_size']
+        #self.batch_size = args['batch_size']
 
-        self.value_epochs = 10
+        self.value_epochs = 20
 
         self.num_conjugate = 10
         self.max_decay_num = 10
         self.line_decay = 0.5
-        self.delta = 0.01
+        self.delta = args['delta']
 
         with tf.variable_scope(self.name):
             #placeholder
@@ -105,10 +105,10 @@ class Agent:
     def build_policy_model(self, name='policy'):
         with tf.variable_scope(name):
             model = tf.layers.dense(self.states, self.hidden1_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            #model = tf.layers.batch_normalization(model)
+            model = tf.layers.batch_normalization(model)
             model = tf.nn.tanh(model)
             model = tf.layers.dense(model, self.hidden2_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            #model = tf.layers.batch_normalization(model)
+            model = tf.layers.batch_normalization(model)
             model = tf.nn.tanh(model)
             model = tf.layers.dense(model, self.action_dim, activation=tf.tanh, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
         return model
@@ -117,10 +117,10 @@ class Agent:
         with tf.variable_scope(name):
             inputs = self.states
             model = tf.layers.dense(inputs, self.hidden1_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            #model = tf.layers.batch_normalization(model)
+            model = tf.layers.batch_normalization(model)
             model = tf.nn.tanh(model)
             model = tf.layers.dense(model, self.hidden2_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            #model = tf.layers.batch_normalization(model)
+            model = tf.layers.batch_normalization(model)
             model = tf.nn.tanh(model)
             model = tf.layers.dense(model, 1, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
             model = tf.reshape(model, [-1])
@@ -145,17 +145,23 @@ class Agent:
             [action] = self.sess.run(self.sample_noise_action, feed_dict={self.states:[state]})
         else:
             [action] = self.sess.run(self.sample_action, feed_dict={self.states:[state]})
-        #action = np.clip(action, self.action_bound_min, self.action_bound_max)
-        return action
+        clipped_action = np.clip(action, self.action_bound_min, self.action_bound_max)
+        return action, clipped_action
 
     def train(self, trajs):
         states = trajs[0]
         actions = trajs[1]
-        rewards = trajs[2]
-        next_states = trajs[3]
-        dones = trajs[4]
-        targets = trajs[5]
+        targets = trajs[2]
         old_means = self.sess.run(self.mean, feed_dict={self.states:states})
+
+        #VALUE update
+        v_s, v_t = shuffle(states, targets, random_state=0)
+        for _ in range(self.value_epochs):
+            v_s, v_t = shuffle(v_s, v_t, random_state=0)
+            self.sess.run(self.v_train_op, feed_dict={
+                    self.states:v_s, 
+                    self.targets:v_t})
+        v_loss = self.sess.run(self.v_loss, feed_dict={self.states:states, self.targets:targets})
 
         #POLICY update
         A, g = self.sess.run([self.A, self.g], feed_dict={
@@ -203,16 +209,6 @@ class Agent:
             beta *= self.line_decay
         self.sess.run(self.assign_op, feed_dict={self.params:max_theta})
 
-        #VALUE update
-        num_batches = len(states) // self.batch_size
-        v_s, v_t = shuffle(states, targets, random_state=0)
-        for _ in range(self.value_epochs):
-            v_s, v_t = shuffle(v_s, v_t, random_state=0)
-            self.sess.run(self.v_train_op, feed_dict={
-                    self.states:v_s, 
-                    self.targets:v_t})
-
-        v_loss = self.sess.run(self.v_loss, feed_dict={self.states:states, self.targets:targets})
         return v_loss, max_objective, max_kl
 
 
@@ -265,7 +261,6 @@ if __name__ == "__main__":
                 'hidden1':2,
                 'hidden2':2,
                 'v_lr':1e-3,
-                'batch_size':128,
                 'std':0.1}
 
     import gym
