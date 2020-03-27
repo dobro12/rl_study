@@ -66,11 +66,8 @@ class Agent:
             norm_actions = self.normalize_action(self.actions)
             p_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/policy')
             log_objective = - tf.reduce_sum(np.log(self.std) + 0.5*np.log(2*np.pi) + tf.squared_difference(norm_actions, self.mean) / (2 * self.std**2), axis=1)
-            log_objective = tf.reduce_mean(log_objective * (self.targets - self.value))
-            #log_objective = tf.reduce_mean(log_objective * self.targets)
-            objective = (tf.squared_difference(self.old_mean, norm_actions) - tf.squared_difference(self.mean, norm_actions))/(2*self.std**2)
-            self.objective = tf.reduce_mean(tf.exp(tf.reduce_sum(objective, axis=1)) * (self.targets - self.value))
-            #self.objective = tf.reduce_mean(tf.exp(tf.reduce_sum(objective, axis=1)) * self.targets)
+            #log_objective = tf.reduce_mean(log_objective * (self.targets - self.value))
+            log_objective = tf.reduce_mean(log_objective * self.targets)
             self.g = tf.gradients(log_objective, p_vars)
             self.g = tf.concat([tf.reshape(g, [-1]) for g in self.g], axis=0)
 
@@ -83,6 +80,9 @@ class Agent:
             self.J = tf.stack(J, axis=0)
             self.A = tf.matmul(tf.transpose(self.J), self.J) / (self.std**2) 
 
+            objective = (tf.squared_difference(self.old_mean, norm_actions) - tf.squared_difference(self.mean, norm_actions))/(2*self.std**2)
+            #self.objective = tf.reduce_mean(tf.exp(tf.reduce_sum(objective, axis=1)) * (self.targets - self.value))
+            self.objective = tf.reduce_mean(tf.exp(tf.reduce_sum(objective, axis=1)) * self.targets)
             kl = tf.reduce_sum(0.5*tf.square((self.mean - self.old_mean)/self.std),axis=1)
             self.kl = tf.reduce_mean(kl)
 
@@ -124,10 +124,10 @@ class Agent:
     def build_policy_model(self, name='policy'):
         with tf.variable_scope(name):
             model = tf.layers.dense(self.states, self.hidden1_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            #model = tf.layers.batch_normalization(model)
+            model = tf.layers.batch_normalization(model)
             model = tf.nn.tanh(model)
             model = tf.layers.dense(model, self.hidden2_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            #model = tf.layers.batch_normalization(model)
+            model = tf.layers.batch_normalization(model)
             model = tf.nn.tanh(model)
             model = tf.layers.dense(model, self.action_dim, activation=tf.tanh, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
         return model
@@ -136,10 +136,10 @@ class Agent:
         with tf.variable_scope(name):
             inputs = self.states
             model = tf.layers.dense(inputs, self.hidden1_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            #model = tf.layers.batch_normalization(model)
+            model = tf.layers.batch_normalization(model)
             model = tf.nn.tanh(model)
             model = tf.layers.dense(model, self.hidden2_units, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
-            #model = tf.layers.batch_normalization(model)
+            model = tf.layers.batch_normalization(model)
             model = tf.nn.tanh(model)
             model = tf.layers.dense(model, 1, activation=None, kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.02))
             model = tf.reshape(model, [-1])
@@ -173,27 +173,16 @@ class Agent:
         rewards = trajs[2]
         next_states = trajs[3]
         dones = trajs[4]
-        targets = trajs[5]
         old_means = self.sess.run(self.mean, feed_dict={self.states:states})
-        #next_values = self.sess.run(self.value, feed_dict={self.states:next_states})
-        #targets = np.array(rewards) + self.discount_factor*next_values
-        #targets = []
-        #for reward, done, next_value in zip(rewards, dones, next_values):
-        #    if done:
-        #        target = reward
-        #    else:
-        #        target = reward + self.discount_factor*next_value
-        #    targets.append(target)
-        '''
         next_values = self.sess.run(self.value, feed_dict={self.states:next_states})
-        values = self.sess.run(self.value, feed_dict={self.states:states})
-        deltas = [r_t + self.discount_factor * v_next - v for r_t, v_next, v in zip(rewards, next_values, values)]
-        gaes = copy.deepcopy(deltas)
-        gae_coef = 0.98
-        for t in reversed(range(len(gaes) - 1)):  # is T-1, where T is time step which run policy
-            gaes[t] = gaes[t] + self.discount_factor * gae_coef * gaes[t + 1]
-        '''
-
+        #targets = np.array(rewards) + self.discount_factor*next_values
+        targets = []
+        for reward, done, next_value in zip(rewards, dones, next_values):
+            if done:
+                target = reward
+            else:
+                target = reward + self.discount_factor*next_value
+            targets.append(target)
 
         #VALUE update
         num_batches = len(states) // self.batch_size
@@ -209,8 +198,8 @@ class Agent:
             self.sess.run(self.v_train_op, feed_dict={
                     self.states:v_s, 
                     self.targets:v_t})
-        next_values = self.sess.run(self.value, feed_dict={self.states:next_states})
-        targets = np.array(rewards) + self.discount_factor*next_values
+        #next_values = self.sess.run(self.value, feed_dict={self.states:next_states})
+        #targets = np.array(rewards) + self.discount_factor*next_values
 
         #POLICY update
         #states, actions, targets, old_means = shuffle(states, actions, targets, old_means, random_state=0)
