@@ -23,71 +23,84 @@ import time
 import sys
 import gym
 
-#env_name = 'Pendulum-v0'
 env_name = 'DobroHalfCheetah-v0'
-#import pybullet_envs
-#env_name = 'HalfCheetahBulletEnv-v0'
 
 save_name = env_name.split('-')[0]
-agent_args = {'agent_name':'DDPG',
+agent_args = {'agent_name':'TRPO',
             'env_name':save_name,
             'discount_factor':0.99,
             'hidden1':128,
             'hidden2':128,
             'v_lr':1e-3,
-            'p_lr':1e-4,
-            'soft_update':0.01}
+            'std':1.0,
+            'delta':0.01}
 
 def train():
     global env_name, save_name, agent_args
     env = gym.make(env_name)
-    if env_name == 'DobroHalfCheetah-v0':
-        env.unwrapped.initialize(is_render=False)
+    env.unwrapped.initialize(is_render=False)
     agent = Agent(env, agent_args)
 
     v_loss_logger = Logger(save_name, 'v_loss')
     p_loss_logger = Logger(save_name, 'p_loss')
     score_logger = Logger(save_name, 'score')
     graph = Graph(1000, save_name.upper(), agent.name)
-    episodes = int(5e5)
-    save_freq = 1
+    episodes = 10
+    epochs = int(1e5)
+    save_freq = 10
 
-    save_period = 1000
+    save_period = 100
     p_losses = deque(maxlen=save_period)
     v_losses = deque(maxlen=save_period)
     entropies = deque(maxlen=save_period)
-    scores = deque(maxlen=save_period)
+    scores = deque(maxlen=save_period*episodes)
 
-    for episode in range(episodes):
-        state = env.reset()
-        agent.actor_noise.reset()
-        done = False
-        score = 0
-        step = 0
+    for epoch in range(epochs):
+        states = []
+        actions = []
+        targets = []
+        ep_step = 0
+        for episode in range(episodes):
+            state = env.reset()
+            done = False
+            score = 0
+            step = 0
+            temp_rewards = []
+            while not done:
+                step += 1
+                ep_step += 1
+                action, clipped_action = agent.get_action(state, True)
+                next_state, reward, done, info = env.step(clipped_action)
 
-        while not done:
-            step += 1
-            action = agent.get_action(state, True)
-            next_state, reward, done, info = env.step(action)
-            agent.replay_memory.append([np.array(state, np.float32), action, reward, done, np.array(next_state, np.float32)])
-            ########################
+                states.append(state)
+                actions.append(action)
+                temp_rewards.append(reward)
 
-            if len(agent.replay_memory) > agent.train_start:
-                v_loss, p_loss = agent.train()
-                v_loss_logger.write([1, v_loss])
-                p_loss_logger.write([1, p_loss])
-                p_losses.append(p_loss)
-                v_losses.append(v_loss)
-                value = agent.get_value(state, action)
-                entropies.append(value)
-                scores.append(reward)
-                graph.update(np.mean(scores), np.mean(p_losses), np.mean(v_losses), np.mean(entropies))
-            state = next_state
-            score += reward
+                state = next_state
+                score += reward
 
-        print(episode, score, agent.epsilon)
-        score_logger.write([step, score])
-        if (episode+1)%save_freq == 0:
+            score_logger.write([step, score])
+            scores.append(score)
+            temp_targets = np.zeros_like(temp_rewards)
+            ret = 0
+            for t in reversed(range(len(temp_rewards))):
+                ret = temp_rewards[t] + agent.discount_factor*ret
+                temp_targets[t] = ret
+            targets += list(temp_targets)
+
+        trajs = [states, actions, targets]
+        v_loss, p_objective, kl = agent.train(trajs)
+
+        v_loss_logger.write([ep_step, v_loss])
+        p_loss_logger.write([ep_step, p_objective])
+        p_losses.append(p_objective)
+        v_losses.append(v_loss)
+        entropies.append(kl)
+
+        #print(v_loss, p_objective, kl)
+        print(np.mean(scores), np.mean(p_losses), np.mean(v_losses), np.mean(entropies))
+        graph.update(np.mean(scores), np.mean(p_losses), np.mean(v_losses), np.mean(entropies))
+        if (epoch+1)%save_freq == 0:
             agent.save()
             v_loss_logger.save()
             p_loss_logger.save()
@@ -98,27 +111,22 @@ def train():
 def test():
     global env_name, save_name, agent_args
     env = gym.make(env_name)
-    if env_name == 'DobroHalfCheetah-v0':
-        env.unwrapped.initialize(is_render=True)
-    elif env_name == 'HalfCheetahBulletEnv-v0':
-        env.render()
+    env.unwrapped.initialize(is_render=True)
     agent = Agent(env, agent_args)
 
     episodes = int(1e6)
-    avg_Q = deque(maxlen=200)
 
     for episode in range(episodes):
         state = env.reset()
-        agent.actor_noise.reset()
         done = False
-
+        score = 0
         while not done:
-            action = agent.get_action(state, False)
-            #action = agent.get_action(state, True)
-            state, reward, done, info = env.step(action)
-            print(np.mean(action))
+            action, clipped_action = agent.get_action(state, False)
+            #action, clipped_action = agent.get_action(state, True)
+            state, reward, done, info = env.step(clipped_action)
+            score += reward
             env.render()
-            time.sleep(0.01)
+        print("score :",score)
 
 if len(sys.argv)== 2 and sys.argv[1] == 'test':
     test()
