@@ -31,11 +31,10 @@ class Agent:
         self.batch_size = args['batch_size']
 
         self.value_epochs = 10
-
         self.num_conjugate = 10
-        self.max_decay_num = 10
-        self.line_decay = 0.5
         self.delta = 0.01
+        self.line_decay = 0.5
+        self.max_decay_num = 100
 
         with tf.variable_scope(self.name):
             #placeholder
@@ -96,6 +95,26 @@ class Agent:
                 param = tf.reshape(self.params[start:start + size], p_var.shape)
                 self.assign_op.append(p_var.assign(param))
                 start += size
+            '''
+            assign_op = []
+            a = 0
+            for var in p_vars:
+                vvv = np.zeros(var.shape)
+                if len(var.shape) == 1:
+                    for i in range(var.shape[0]):
+                        a+= 1
+                        vvv[i] = a
+                else:
+                    for i in range(var.shape[0]):
+                        for j in range(var.shape[1]):
+                            a+= 1
+                            vvv[i, j] = a
+                assign_op.append(var.assign(vvv))
+
+            flatten_p_vars = tf.concat([tf.reshape(g, [-1]) for g in p_vars], axis=0)
+            self.sess.run(assign_op)
+            print(self.sess.run(flatten_p_vars))
+            '''
 
             #make session and load model
             self.sess = tf.Session()
@@ -156,22 +175,99 @@ class Agent:
         dones = trajs[4]
         targets = trajs[5]
         old_means = self.sess.run(self.mean, feed_dict={self.states:states})
+        #next_values = self.sess.run(self.value, feed_dict={self.states:next_states})
+        #targets = np.array(rewards) + self.discount_factor*next_values
+        #targets = []
+        #for reward, done, next_value in zip(rewards, dones, next_values):
+        #    if done:
+        #        target = reward
+        #    else:
+        #        target = reward + self.discount_factor*next_value
+        #    targets.append(target)
+        '''
+        next_values = self.sess.run(self.value, feed_dict={self.states:next_states})
+        values = self.sess.run(self.value, feed_dict={self.states:states})
+        deltas = [r_t + self.discount_factor * v_next - v for r_t, v_next, v in zip(rewards, next_values, values)]
+        gaes = copy.deepcopy(deltas)
+        gae_coef = 0.98
+        for t in reversed(range(len(gaes) - 1)):  # is T-1, where T is time step which run policy
+            gaes[t] = gaes[t] + self.discount_factor * gae_coef * gaes[t + 1]
+        '''
+
+        #VALUE update
+        num_batches = len(states) // self.batch_size
+        v_s, v_t = shuffle(states, targets, random_state=0)
+        for _ in range(self.value_epochs):
+            v_s, v_t = shuffle(v_s, v_t, random_state=0)
+            #for j in range(num_batches): 
+            #    start = j * self.batch_size
+            #    end = (j + 1) * self.batch_size
+            #    self.sess.run(self.v_train_op, feed_dict={
+            #        self.states:v_s[start:end], 
+            #        self.targets:v_t[start:end]})
+            self.sess.run(self.v_train_op, feed_dict={
+                    self.states:v_s, 
+                    self.targets:v_t})
+        #next_values = self.sess.run(self.value, feed_dict={self.states:next_states})
+        #targets = np.array(rewards) + self.discount_factor*next_values
 
         #POLICY update
+        #states, actions, targets, old_means = shuffle(states, actions, targets, old_means, random_state=0)
+        #for j in range(num_batches): 
+        #    start = j * self.batch_size
+        #    end = (j + 1) * self.batch_size
+        #J, g = self.sess.run([self.J, self.g], feed_dict={
         A, g = self.sess.run([self.A, self.g], feed_dict={
             self.states:states,
             self.actions:actions,
             self.targets:targets})
+        #for i, cond in enumerate(abs(J[0]) < 0.01):
+        #    if cond: J[0,i] = 0.0
+        #A = np.dot(J.T, J)
 
-        approxA = A + np.eye(len(A))*1e-2 #실제로 A는 역행렬이 존재하는데, 아이젠벨류가 너무 작아 안되는걸 막아줌. 매우작은 항등행렬을 추가해주는 효과!
-        x_value = self.conjugate_gradient_method(approxA, g)
+        '''
+        strs = "["
+        for i in range(A.shape[0]):
+            strs+="["
+            for j in range(A.shape[1]):
+                strs+="{}, ".format(A[i,j])
+            strs = strs[:-2]
+            strs+="],"
+        strs = strs[:-1]
+        strs+="]"
+        print(strs)
+        strs = "["
+        for i in range(J.shape[1]):
+            strs+="{}, ".format(J[0, i])
+        strs = strs[:-2]
+        strs+="]"
+        print(strs)
+        '''
+        #x_value = self.conjugate_gradient_method(A,g)
+        #x_value = x_value/np.sqrt(np.inner(x_value, x_value))
+        #try:
+        #    x_value = np.matmul(np.linalg.inv(A), g)
+        #    x_value = x_value/np.sqrt(np.inner(x_value, x_value))
+        #except:
+        while True:
+            P = np.random.normal(size=A.shape)*0.001
+            A += (P.T + P)
+            x_value = np.matmul(np.linalg.inv(A), g)
+            #x_value = x_value/np.sqrt(np.inner(x_value, x_value))
+            if not np.isnan(np.sum(x_value)):
+                break
+        #residue = np.matmul(A, x_value) - g
+        #rs = np.inner(residue, residue)
+        #print("residue :",np.sqrt(rs), np.sqrt(np.inner(g,g)), np.sqrt(np.inner(x_value,x_value)))
 
         #line search
-        xAx = np.inner(x_value, np.matmul(approxA, x_value))
+        #xAx = np.inner(x_value, np.matmul(A, x_value))
+        xAx = np.clip(np.inner(x_value, np.matmul(A, x_value)), 1e-2, np.inf)
         beta = np.sqrt(2*self.delta / xAx)
-        #lm = np.sqrt((0.5*xAx) / self.delta)
-        #beta = 1/lm
-        #print(xAx, lm, beta)
+        if np.isnan(beta):
+            print(x_value)
+            print(np.inner(x_value, np.matmul(A, x_value)))
+            raise ValueError("beta is NaN!")
         init_theta = self.sess.run(self.flatten_p_vars)
         max_objective = None
         max_theta = None
@@ -194,23 +290,22 @@ class Agent:
                     max_theta = deepcopy(theta)
                     max_kl = kl
             else:
-                if max_objective < objective and kl <= self.delta:
+                if kl > self.delta:
+                    break
+                if max_objective > objective + 0.1:
+                    break
+                if max_objective < objective:
                     max_objective = objective                    
                     max_theta = deepcopy(theta)
                     max_kl = kl
             if cnt > self.max_decay_num and max_objective != None:
                 break
             beta *= self.line_decay
+        #if max_objective == None:
+        #    max_objective = objective
+        #    max_theta = deepcopy(theta)
+        #    max_kl = kl
         self.sess.run(self.assign_op, feed_dict={self.params:max_theta})
-
-        #VALUE update
-        num_batches = len(states) // self.batch_size
-        v_s, v_t = shuffle(states, targets, random_state=0)
-        for _ in range(self.value_epochs):
-            v_s, v_t = shuffle(v_s, v_t, random_state=0)
-            self.sess.run(self.v_train_op, feed_dict={
-                    self.states:v_s, 
-                    self.targets:v_t})
 
         v_loss = self.sess.run(self.v_loss, feed_dict={self.states:states, self.targets:targets})
         return v_loss, max_objective, max_kl
@@ -218,23 +313,22 @@ class Agent:
 
     def conjugate_gradient_method(self, A, g):
         x_value = np.zeros_like(g)
-        residue = deepcopy(g)
-        p_vector = deepcopy(g)
+        residue = g - np.matmul(A, x_value)
+        p_vector = deepcopy(residue)
         rs_old = np.inner(residue, residue)
-
         for i in range(self.num_conjugate):
             Ap = np.matmul(A, p_vector)
-            pAp = np.inner(p_vector, Ap)
+            pAp = np.clip(np.inner(p_vector, Ap), 1e-2, np.inf)
             alpha = rs_old / pAp
+            if np.isnan(np.sum(alpha*p_vector)):
+                break
             x_value += alpha * p_vector
             residue -= alpha * Ap
             rs_new = np.inner(residue, residue)
-
             if np.sqrt(rs_new) < 1e-5:
                 break
             p_vector = residue + (rs_new / (1e-10 + rs_old)) * p_vector
             rs_old = rs_new
-
         return x_value
 
     def save(self):

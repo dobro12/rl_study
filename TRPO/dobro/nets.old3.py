@@ -31,11 +31,10 @@ class Agent:
         self.batch_size = args['batch_size']
 
         self.value_epochs = 10
-
         self.num_conjugate = 10
-        self.max_decay_num = 10
-        self.line_decay = 0.5
         self.delta = 0.01
+        self.line_decay = 0.5
+        self.max_decay_num = 100
 
         with tf.variable_scope(self.name):
             #placeholder
@@ -162,24 +161,71 @@ class Agent:
             self.states:states,
             self.actions:actions,
             self.targets:targets})
+        #for i, cond in enumerate(abs(J[0]) < 0.01):
+        #    if cond: J[0,i] = 0.0
+        #A = np.dot(J.T, J)
 
-        approxA = A + np.eye(len(A))*1e-2 #실제로 A는 역행렬이 존재하는데, 아이젠벨류가 너무 작아 안되는걸 막아줌. 매우작은 항등행렬을 추가해주는 효과!
+        '''
+        strs = "["
+        for i in range(A.shape[0]):
+            strs+="["
+            for j in range(A.shape[1]):
+                strs+="{}, ".format(A[i,j])
+            strs = strs[:-2]
+            strs+="],"
+        strs = strs[:-1]
+        strs+="]"
+        print(strs)
+        strs = "["
+        for i in range(J.shape[1]):
+            strs+="{}, ".format(J[0, i])
+        strs = strs[:-2]
+        strs+="]"
+        print(strs)
+        '''
+
+        approxA = A + 1e-2 #실제로 A는 역행렬이 존재하는데, 아이젠벨류가 너무 작아 안되는걸 막아줌. 매우작은 항등행렬을 추가해주는 효과!
         x_value = self.conjugate_gradient_method(approxA, g)
 
+        '''
+        while True:
+            P = np.random.normal(size=A.shape)*0.001
+            A += (P.T + P)
+            x_value = np.matmul(np.linalg.inv(A), g)
+            if not np.isnan(np.sum(x_value)):
+                break
+        '''
+        #residue = np.matmul(A, x_value) - g
+        #rs = np.inner(residue, residue)
+        #print("residue :",np.sqrt(rs), np.sqrt(np.inner(g,g)), np.sqrt(np.inner(x_value,x_value)))
+
         #line search
-        xAx = np.inner(x_value, np.matmul(approxA, x_value))
+        #xAx = np.inner(x_value, np.matmul(A, x_value))
+        xAx = np.clip(np.inner(x_value, np.matmul(A, x_value)), 1e-2, np.inf)
         beta = np.sqrt(2*self.delta / xAx)
-        #lm = np.sqrt((0.5*xAx) / self.delta)
-        #beta = 1/lm
-        #print(xAx, lm, beta)
+        if np.isnan(beta):
+            print(x_value)
+            print(np.inner(x_value, np.matmul(A, x_value)))
+
+            x_value = np.matmul(np.linalg.inv(A), g)
+            residue = np.matmul(A, x_value) - g
+            rs = np.inner(residue, residue)
+            print("real residue :", np.sqrt(rs))
+
+            x_value = np.matmul(np.linalg.inv(approxA), g)
+            residue = np.matmul(A, x_value) - g
+            rs = np.inner(residue, residue)
+            print("approx residue :", np.sqrt(rs))
+
+            raise ValueError("beta is NaN!")
         init_theta = self.sess.run(self.flatten_p_vars)
         max_objective = None
         max_theta = None
         max_kl = None
         cnt = 0
 
-        #for i in range(self.max_decay_num):
-        while True:
+        #while True:
+        for i in range(self.max_decay_num):
             cnt += 1
             theta = beta*x_value + init_theta
             self.sess.run(self.assign_op, feed_dict={self.params:theta})
@@ -194,13 +240,21 @@ class Agent:
                     max_theta = deepcopy(theta)
                     max_kl = kl
             else:
+                #if kl > self.delta:
+                #    break
+                #if max_objective > objective + 0.1:
+                #    break
                 if max_objective < objective and kl <= self.delta:
                     max_objective = objective                    
                     max_theta = deepcopy(theta)
                     max_kl = kl
-            if cnt > self.max_decay_num and max_objective != None:
-                break
+            #if cnt > self.max_decay_num and max_objective != None:
+            #    break
             beta *= self.line_decay
+        #if max_objective == None:
+        #    max_objective = objective
+        #    max_theta = deepcopy(theta)
+        #    max_kl = kl
         self.sess.run(self.assign_op, feed_dict={self.params:max_theta})
 
         #VALUE update
