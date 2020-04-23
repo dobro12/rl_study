@@ -34,14 +34,12 @@ class Agent:
         self.line_decay = args['line_decay']
         self.max_kl = args['max_kl']
         self.damping_coeff = args['damping_coeff']
-        self.gae_coeff = args['gae_coeff']
 
         with tf.variable_scope(self.name):
             #placeholder
             self.states = tf.placeholder(tf.float32, [None, self.state_dim], name='State')
             self.actions = tf.placeholder(tf.float32, [None, self.action_dim], name='Action')
             self.targets = tf.placeholder(tf.float32, [None,], name='targets')
-            self.gaes = tf.placeholder(tf.float32, [None,], name='gaes')
             self.old_mean = tf.placeholder(tf.float32, [None, self.action_dim], name='old_mean')
 
             #policy & value
@@ -67,13 +65,11 @@ class Agent:
             norm_actions = self.normalize_action(self.actions)
             p_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/policy')
             log_objective = - tf.reduce_sum(np.log(self.std) + 0.5*np.log(2*np.pi) + tf.squared_difference(norm_actions, self.mean) / (2 * self.std**2), axis=1)
-            #log_objective = tf.reduce_mean(log_objective * (self.targets - self.value))
+            log_objective = tf.reduce_mean(log_objective * (self.targets - self.value))
             #log_objective = tf.reduce_mean(log_objective * self.targets)
-            log_objective = tf.reduce_mean(log_objective * self.gaes)
             objective = (tf.squared_difference(self.old_mean, norm_actions) - tf.squared_difference(self.mean, norm_actions))/(2*self.std**2)
             #self.objective = tf.reduce_mean(tf.exp(tf.reduce_sum(objective, axis=1)) * (self.targets - self.value))
-            #self.objective = tf.reduce_mean(tf.exp(tf.reduce_sum(objective, axis=1)) * self.targets)
-            self.objective = tf.reduce_mean(tf.exp(tf.reduce_sum(objective, axis=1)) * self.gaes)
+            self.objective = tf.reduce_mean(tf.exp(tf.reduce_sum(objective, axis=1)) * self.targets)
             self.g = tf.gradients(log_objective, p_vars)
             self.g = tf.concat([tf.reshape(g, [-1]) for g in self.g], axis=0)
 
@@ -143,24 +139,11 @@ class Agent:
 
     def get_action(self, state, is_train):
         if is_train:
-            [[action], [value]] = self.sess.run([self.sample_noise_action, self.value], feed_dict={self.states:[state]})
+            [action] = self.sess.run(self.sample_noise_action, feed_dict={self.states:[state]})
         else:
-            [[action], [value]] = self.sess.run([self.sample_action, self.value], feed_dict={self.states:[state]})
+            [action] = self.sess.run(self.sample_action, feed_dict={self.states:[state]})
         clipped_action = np.clip(action, self.action_bound_min, self.action_bound_max)
-        return action, clipped_action, value
-
-    def get_gaes_targets(self, rewards, values, next_values):
-        deltas = np.array(rewards) + self.discount_factor*np.array(next_values) - np.array(values)
-        gaes = deepcopy(deltas)
-        targets = np.zeros_like(rewards)
-        #targets = np.array(rewards) + self.discount_factor*np.array(next_values)
-        ret = 0
-        for t in reversed(range(len(gaes))):
-            if t < len(gaes) - 1:
-                gaes[t] = gaes[t] + self.discount_factor*self.gae_coeff*gaes[t + 1]
-            ret = rewards[t] + self.discount_factor*ret
-            targets[t] = ret
-        return gaes, targets
+        return action, clipped_action
 
     def train(self, trajs):
         states = trajs[0]
@@ -168,8 +151,8 @@ class Agent:
         targets = trajs[2]
         next_states = trajs[3]
         rewards = trajs[4]
-        gaes = trajs[5]
         old_means = self.sess.run(self.mean, feed_dict={self.states:states})
+        #targets = np.array(rewards) + self.discount_factor*self.sess.run(self.value, feed_dict={self.states:next_states})
 
         #VALUE update
         v_s, v_t = shuffle(states, targets, random_state=0)
@@ -184,7 +167,7 @@ class Agent:
         J, g = self.sess.run([self.J, self.g], feed_dict={
             self.states:states,
             self.actions:actions,
-            self.gaes:gaes})
+            self.targets:targets})
 
         M = 1.0 / self.std**2
         J_tM = J.T * M
@@ -200,12 +183,6 @@ class Agent:
         max_kl = None
         cnt = 0
 
-        init_objective = self.sess.run(self.objective, feed_dict={
-            self.states:states,
-            self.actions:actions,
-            self.gaes:gaes,
-            self.old_mean:old_means})
-
         #for i in range(self.max_decay_num):
         while True:
             cnt += 1
@@ -214,15 +191,8 @@ class Agent:
             kl, objective = self.sess.run([self.kl, self.objective], feed_dict={
                 self.states:states,
                 self.actions:actions,
-                self.gaes:gaes,
+                self.targets:targets,
                 self.old_mean:old_means})
-
-            if kl <= self.max_kl and objective > init_objective:
-                max_objective = objective
-                max_kl = kl
-                break
-
-            '''
             if max_objective == None:
                 if kl <= self.max_kl:
                     max_objective = objective
@@ -235,20 +205,17 @@ class Agent:
                     max_kl = kl
             if cnt > self.max_decay_num and max_objective != None:
                 break
-            '''
             beta *= self.line_decay
 
-        '''
         if max_objective == None:
             self.sess.run(self.assign_op, feed_dict={self.params:init_theta})
             max_kl, max_objective = self.sess.run([self.kl, self.objective], feed_dict={
                 self.states:states,
                 self.actions:actions,
-                self.gaes:gaes,
+                self.targets:targets,
                 self.old_mean:old_means})
         else:
             self.sess.run(self.assign_op, feed_dict={self.params:max_theta})
-        '''
 
         return v_loss, max_objective, max_kl
 

@@ -25,11 +25,13 @@ agent_args = {'agent_name':'TRPO',
             'hidden1':64,
             'hidden2':64,
             'v_lr':1e-3,
-            'value_epochs':20,
+            'value_epochs':80,
             'num_conjugate':10,
             'max_decay_num':10,
-            'line_decay':0.5,
+            'line_decay':0.8,
             'max_kl':0.01,
+            'damping_coeff':0.01,
+            'gae_coeff':0.97,
             'std':0.01,
             }
 
@@ -58,6 +60,7 @@ def train():
         targets = []
         next_states = []
         rewards = []
+        gaes = []
         ep_step = 0
         for episode in range(episodes):
             state = env.reset()
@@ -65,10 +68,11 @@ def train():
             score = 0
             step = 0
             temp_rewards = []
+            values = []
             while not done:
                 step += 1
                 ep_step += 1
-                action, clipped_action = agent.get_action(state, True)
+                action, clipped_action, value = agent.get_action(state, True)
                 if clipped_action > 0:
                     a_t = 1
                 else:
@@ -80,20 +84,21 @@ def train():
                 temp_rewards.append(reward)
                 next_states.append(next_state)
                 rewards.append(reward)
+                values.append(value)
 
                 state = next_state
                 score += reward
 
             score_logger.write([step, score])
             scores.append(score)
-            temp_targets = np.zeros_like(temp_rewards)
-            ret = 0
-            for t in reversed(range(len(temp_rewards))):
-                ret = temp_rewards[t] + agent.discount_factor*ret
-                temp_targets[t] = ret
-            targets += list(temp_targets)
 
-        trajs = [states, actions, targets, next_states, rewards]
+            action, clipped_action, value = agent.get_action(state, True)
+            next_values = values[1:] + [value]
+            temp_gaes, temp_targets = agent.get_gaes_targets(temp_rewards, values, next_values)
+            targets += list(temp_targets)
+            gaes += list(temp_gaes)
+
+        trajs = [states, actions, targets, next_states, rewards, gaes]
         v_loss, p_objective, kl = agent.train(trajs)
 
         v_loss_logger.write([ep_step, v_loss])
@@ -124,8 +129,8 @@ def test():
         done = False
         score = 0
         while not done:
-            action, clipped_action = agent.get_action(state, False)
-            #action, clipped_action = agent.get_action(state, True)
+            action, clipped_action, value = agent.get_action(state, False)
+            #action, clipped_action, value = agent.get_action(state, True)
             if clipped_action > 0:
                 a_t = 1
             else:
