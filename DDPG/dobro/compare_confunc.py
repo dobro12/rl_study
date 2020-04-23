@@ -12,10 +12,13 @@ rc('font', **font)
 
 #env_name = 'MountainCarContinuous'
 #env_name = 'Pendulum'
-env_name = 'DobroHalfCheetah'
-item_name = 'score'
+#env_name = 'CartPole'
+#env_name = 'DobroHalfCheetah'
+env_name = "Safexp_PointGoal1"
+#item_name = 'score'
+item_name = 'cost'
 #item_name = 'loss'
-moving_period = 20
+moving_period = 1000
 
 def smoothing(steps, records):
     iters = []
@@ -42,8 +45,10 @@ for dir_name in dir_names:
     temp_records = [] #log갯수 * 총step * 2(각step수, score)
     for record_name in record_names:
         with open(record_name, 'rb') as f:
-            temp_records.append(pickle.load(f))
-    records.append(temp_records) #폴더수 * log갯수 * 총step * 2(각step수, score)
+            #temp_records.append(pickle.load(f))
+            temp_records += pickle.load(f)
+    #records.append(temp_records) #폴더수 * log갯수 * 총step * 2(각step수, score)
+    records.append([temp_records]) #폴더수 * log갯수 * 총step * 2(각step수, score)
 
 steps = []
 rewards = []

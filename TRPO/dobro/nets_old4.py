@@ -33,7 +33,6 @@ class Agent:
         self.max_decay_num = args['max_decay_num']
         self.line_decay = args['line_decay']
         self.max_kl = args['max_kl']
-        self.damping_coeff = 1e-2
 
         with tf.variable_scope(self.name):
             #placeholder
@@ -80,6 +79,7 @@ class Agent:
                 ith_J = tf.concat([tf.reshape(g, [-1]) for g in ith_J], axis=0)
                 J.append(ith_J)
             self.J = tf.stack(J, axis=0)
+            self.A = tf.matmul(tf.transpose(self.J), self.J) / (self.std**2) 
 
             kl = tf.reduce_sum(0.5*tf.square((self.mean - self.old_mean)/self.std),axis=1)
             self.kl = tf.reduce_mean(kl)
@@ -149,10 +149,7 @@ class Agent:
         states = trajs[0]
         actions = trajs[1]
         targets = trajs[2]
-        next_states = trajs[3]
-        rewards = trajs[4]
         old_means = self.sess.run(self.mean, feed_dict={self.states:states})
-        #targets = np.array(rewards) + self.discount_factor*self.sess.run(self.value, feed_dict={self.states:next_states})
 
         #VALUE update
         v_s, v_t = shuffle(states, targets, random_state=0)
@@ -164,18 +161,16 @@ class Agent:
         v_loss = self.sess.run(self.v_loss, feed_dict={self.states:states, self.targets:targets})
 
         #POLICY update
-        J, g = self.sess.run([self.J, self.g], feed_dict={
+        A, g = self.sess.run([self.A, self.g], feed_dict={
             self.states:states,
             self.actions:actions,
             self.targets:targets})
 
-        M = 1.0 / self.std**2
-        J_tM = J.T * M
-        x_value = self.conjugate_gradient_method(J_tM, J, g)
+        approxA = A + np.eye(len(A))*1e-2 #실제로 A는 역행렬이 존재하는데, 아이젠벨류가 너무 작아 안되는걸 막아줌. 매우작은 항등행렬을 추가해주는 효과!
+        x_value = self.conjugate_gradient_method(approxA, g)
 
         #line search
-        Ax = np.matmul(J_tM, np.matmul(J, x_value)) + self.damping_coeff * x_value
-        xAx = np.inner(x_value, Ax)
+        xAx = np.inner(x_value, np.matmul(approxA, x_value))
         beta = np.sqrt(2*self.max_kl / xAx)
         init_theta = self.sess.run(self.flatten_p_vars)
         max_objective = None
@@ -183,7 +178,6 @@ class Agent:
         max_kl = None
         cnt = 0
 
-        #for i in range(self.max_decay_num):
         while True:
             cnt += 1
             theta = beta*x_value + init_theta
@@ -206,28 +200,19 @@ class Agent:
             if cnt > self.max_decay_num and max_objective != None:
                 break
             beta *= self.line_decay
-
-        if max_objective == None:
-            self.sess.run(self.assign_op, feed_dict={self.params:init_theta})
-            max_kl, max_objective = self.sess.run([self.kl, self.objective], feed_dict={
-                self.states:states,
-                self.actions:actions,
-                self.targets:targets,
-                self.old_mean:old_means})
-        else:
-            self.sess.run(self.assign_op, feed_dict={self.params:max_theta})
+        self.sess.run(self.assign_op, feed_dict={self.params:max_theta})
 
         return v_loss, max_objective, max_kl
 
 
-    def conjugate_gradient_method(self, J_tM, J, g):
+    def conjugate_gradient_method(self, A, g):
         x_value = np.zeros_like(g)
         residue = deepcopy(g)
         p_vector = deepcopy(g)
         rs_old = np.inner(residue, residue)
 
         for i in range(self.num_conjugate):
-            Ap = np.matmul(J_tM, np.matmul(J, p_vector)) + self.damping_coeff * p_vector
+            Ap = np.matmul(A, p_vector)
             pAp = np.inner(p_vector, Ap)
             alpha = rs_old / pAp
             x_value += alpha * p_vector

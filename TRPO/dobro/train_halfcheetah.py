@@ -23,7 +23,8 @@ import time
 import sys
 import gym
 
-env_name = 'DobroHalfCheetah-v0'
+#env_name = 'DobroHalfCheetah-v0'
+env_name = 'HalfCheetah-v0'
 
 save_name = env_name.split('-')[0]
 agent_args = {'agent_name':'TRPO',
@@ -32,8 +33,13 @@ agent_args = {'agent_name':'TRPO',
             'hidden1':128,
             'hidden2':128,
             'v_lr':1e-3,
-            'std':1.0,
-            'delta':0.01}
+            'value_epochs':20,
+            'num_conjugate':10,
+            'max_decay_num':10,
+            'line_decay':0.5,
+            'max_kl':0.01,
+            'std':0.1,
+            }
 
 def train():
     global env_name, save_name, agent_args
