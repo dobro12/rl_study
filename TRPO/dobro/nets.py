@@ -33,7 +33,7 @@ class Agent:
         self.max_decay_num = args['max_decay_num']
         self.line_decay = args['line_decay']
         self.max_kl = args['max_kl']
-        self.damping_coeff = 1e-2
+        self.damping_coeff = args['damping_coeff']
 
         with tf.variable_scope(self.name):
             #placeholder
