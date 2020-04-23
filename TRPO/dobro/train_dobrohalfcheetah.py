@@ -4,6 +4,13 @@ warnings.filterwarnings("ignore")
 from tensorflow.python.util import deprecation
 deprecation._PRINT_DEPRECATION_WARNINGS = False
 ###########################
+import subprocess
+import sys
+GITPATH = subprocess.run('git rev-parse --show-toplevel'.split(' '), \
+        stdout=subprocess.PIPE).stdout.decode('utf-8').replace('\n','')
+sys.path.append(GITPATH)
+import dobroEnv
+##############################################################
 
 from graph_drawer import Graph
 from logger import Logger
@@ -16,52 +23,50 @@ import time
 import sys
 import gym
 
-env_name = 'HalfCheetah-v2'
+#env_name = 'DobroHalfCheetah-v0'
+env_name = 'HalfCheetah-v0'
 
 save_name = env_name.split('-')[0]
 agent_args = {'agent_name':'TRPO',
             'env_name':save_name,
             'discount_factor':0.99,
-            'hidden1':256,
-            'hidden2':256,
+            'hidden1':128,
+            'hidden2':128,
             'v_lr':1e-3,
             'value_epochs':20,
             'num_conjugate':10,
             'max_decay_num':10,
             'line_decay':0.5,
             'max_kl':0.01,
-            'std':0.01,
+            'std':0.1,
             }
 
 def train():
     global env_name, save_name, agent_args
     env = gym.make(env_name)
+    env.unwrapped.initialize(is_render=False)
     agent = Agent(env, agent_args)
 
     v_loss_logger = Logger(save_name, 'v_loss')
-    kl_logger = Logger(save_name, 'kl')
+    p_loss_logger = Logger(save_name, 'p_loss')
     score_logger = Logger(save_name, 'score')
-    graph = Graph(1000, save_name, ['score', 'policy objective', 'value loss', 'kl divergence'])
+    graph = Graph(1000, save_name.upper(), agent.name)
     episodes = 10
-    max_steps = 4000
     epochs = int(1e5)
     save_freq = 10
 
-    save_period = 10
-    p_objectives = deque(maxlen=save_period)
+    save_period = 100
+    p_losses = deque(maxlen=save_period)
     v_losses = deque(maxlen=save_period)
-    kl_divergence = deque(maxlen=save_period)
+    entropies = deque(maxlen=save_period)
     scores = deque(maxlen=save_period*episodes)
 
     for epoch in range(epochs):
         states = []
         actions = []
         targets = []
-        next_states = []
-        rewards = []
         ep_step = 0
-        #for episode in range(episodes):
-        while ep_step < max_steps:
+        for episode in range(episodes):
             state = env.reset()
             done = False
             score = 0
@@ -76,8 +81,6 @@ def train():
                 states.append(state)
                 actions.append(action)
                 temp_rewards.append(reward)
-                next_states.append(next_state)
-                rewards.append(reward)
 
                 state = next_state
                 score += reward
@@ -91,28 +94,30 @@ def train():
                 temp_targets[t] = ret
             targets += list(temp_targets)
 
-        trajs = [states, actions, targets, next_states, rewards]
+        trajs = [states, actions, targets]
         v_loss, p_objective, kl = agent.train(trajs)
 
         v_loss_logger.write([ep_step, v_loss])
-        kl_logger.write([ep_step, kl])
-        p_objectives.append(p_objective)
+        p_loss_logger.write([ep_step, p_objective])
+        p_losses.append(p_objective)
         v_losses.append(v_loss)
-        kl_divergence.append(kl)
+        entropies.append(kl)
 
-        print(np.mean(scores), np.mean(p_objectives), np.mean(v_losses), np.mean(kl_divergence))
-        graph.update([np.mean(scores), np.mean(p_objectives), np.mean(v_losses), np.mean(kl_divergence)])
+        #print(v_loss, p_objective, kl)
+        print(np.mean(scores), np.mean(p_losses), np.mean(v_losses), np.mean(entropies))
+        graph.update(np.mean(scores), np.mean(p_losses), np.mean(v_losses), np.mean(entropies))
         if (epoch+1)%save_freq == 0:
             agent.save()
             v_loss_logger.save()
-            kl_logger.save()
+            p_loss_logger.save()
             score_logger.save()
 
-    graph.update(None, finished=True)
+    graph.update(0,0,0,0,finished=True)
 
 def test():
     global env_name, save_name, agent_args
     env = gym.make(env_name)
+    env.unwrapped.initialize(is_render=True)
     agent = Agent(env, agent_args)
 
     episodes = int(1e6)
@@ -127,7 +132,6 @@ def test():
             state, reward, done, info = env.step(clipped_action)
             score += reward
             env.render()
-            time.sleep(0.01)
         print("score :",score)
 
 if len(sys.argv)== 2 and sys.argv[1] == 'test':

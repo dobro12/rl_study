@@ -159,7 +159,7 @@ class Agent:
         for _ in range(self.value_epochs):
             v_s, v_t = shuffle(v_s, v_t, random_state=0)
             self.sess.run(self.v_train_op, feed_dict={
-                    self.states:v_s, 
+                    self.states:v_s,
                     self.targets:v_t})
         v_loss = self.sess.run(self.v_loss, feed_dict={self.states:states, self.targets:targets})
 
@@ -200,7 +200,7 @@ class Agent:
                     max_kl = kl
             else:
                 if max_objective < objective and kl <= self.max_kl:
-                    max_objective = objective                    
+                    max_objective = objective
                     max_theta = deepcopy(theta)
                     max_kl = kl
             if cnt > self.max_decay_num and max_objective != None:
