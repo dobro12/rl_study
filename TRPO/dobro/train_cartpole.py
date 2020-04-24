@@ -7,7 +7,8 @@ deprecation._PRINT_DEPRECATION_WARNINGS = False
 
 from graph_drawer import Graph
 from logger import Logger
-from nets import Agent
+#from nets import Agent
+from nets_spinningup import Agent
 
 from collections import deque
 import numpy as np

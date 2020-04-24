@@ -7,7 +7,8 @@ deprecation._PRINT_DEPRECATION_WARNINGS = False
 
 from graph_drawer import Graph
 from logger import Logger
-from nets import Agent
+#from nets import Agent
+from nets_spinningup import Agent
 
 from collections import deque
 import numpy as np
@@ -46,6 +47,7 @@ def train():
     graph = Graph(1000, save_name, ['score', 'policy objective', 'value loss', 'kl divergence'])
     episodes = 10
     max_steps = 4000
+    max_ep_len = min(1000, env.spec.max_episode_steps)
     epochs = int(1e5)
     save_freq = 10
 
@@ -71,7 +73,7 @@ def train():
             step = 0
             temp_rewards = []
             values = []
-            while not done:
+            while True:
                 step += 1
                 ep_step += 1
                 action, clipped_action, value = agent.get_action(state, True)
@@ -86,7 +88,15 @@ def train():
 
                 state = next_state
                 score += reward
-            action, clipped_action, value = agent.get_action(state, True)
+
+                if done or step >= max_ep_len:
+                    break
+
+            if step >= max_ep_len:
+                action, clipped_action, value = agent.get_action(state, True)
+            else: #중간에 끝난 거면, 다 돌기전에 죽어버린거니, value = 0 으로 해야함
+                value = 0
+                print("done before max_ep_len...") 
             next_values = values[1:] + [value]
             temp_gaes, temp_targets = agent.get_gaes_targets(temp_rewards, values, next_values)
             targets += list(temp_targets)

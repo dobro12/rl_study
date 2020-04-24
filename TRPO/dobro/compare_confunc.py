@@ -12,8 +12,8 @@ rc('font', **font)
 
 #env_name = 'MountainCarContinuous'
 #env_name = 'Pendulum'
-env_name = 'CartPole'
-#env_name = 'HalfCheetah'
+#env_name = 'CartPole'
+env_name = 'HalfCheetah'
 #env_name = "Safexp_PointGoal1"
 item_name = 'score'
 #item_name = 'cost'
