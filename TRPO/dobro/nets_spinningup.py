@@ -70,7 +70,7 @@ class Agent:
             #policy optimizer
             norm_actions = self.normalize_action(self.actions)
             p_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/policy')
-            self.log_prob = - tf.reduce_sum(tf.log(self.std) + 0.5*np.log(2*np.pi) + tf.squared_difference(norm_actions, self.mean) / (2 * tf.square(self.std)), axis=1)
+            self.log_prob = - tf.reduce_sum(tf.log(self.std + EPS) + 0.5*np.log(2*np.pi) + tf.squared_difference(norm_actions, self.mean) / (2 * tf.square(self.std) + EPS), axis=1)
             self.objective = tf.reduce_mean(tf.exp(self.log_prob - self.log_prob_old) * self.gaes)
             self.grad_g = tf.gradients(self.objective, p_vars)
             self.grad_g = tf.concat([tf.reshape(g, [-1]) for g in self.grad_g], axis=0)
