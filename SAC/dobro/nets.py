@@ -66,7 +66,8 @@ class Agent:
             self.log_prob = -tf.reduce_sum(self.log_std + 0.5*np.log(2*np.pi) + 0.5*tf.square((self.norm_noise_action-self.mean)/(self.std + EPS)), axis=1)
 
             #apply squashing
-            self.log_prob -= tf.reduce_sum(2*np.log(2.0) - self.norm_noise_action - tf.nn.softplus(-2*self.norm_noise_action), axis=1)
+            #self.log_prob -= tf.reduce_sum(2*np.log(2.0) - self.norm_noise_action - tf.nn.softplus(-2*self.norm_noise_action), axis=1)
+            self.log_prob -= tf.reduce_sum(2*(np.log(2.0) - self.norm_noise_action - tf.nn.softplus(-2*self.norm_noise_action)) + tf.log(self.action_bound_max), axis=1)
             self.norm_noise_action = tf.nn.tanh(self.norm_noise_action)
             self.norm_action = tf.nn.tanh(self.norm_action)
             self.sample_noise_action = self.unnormalize_action(self.norm_noise_action)
@@ -76,7 +77,8 @@ class Agent:
             next_mean, next_log_std, next_std = self.build_policy_model(self.next_states, 'policy', reuse=True)
             next_norm_noise_action = next_mean + tf.multiply(tf.random_normal(tf.shape(next_mean)), next_std)
             self.log_prob_next = -tf.reduce_sum(next_log_std + 0.5*np.log(2*np.pi) + 0.5*tf.square((next_norm_noise_action-next_mean)/(next_std + EPS)), axis=1)
-            self.log_prob_next -= tf.reduce_sum(2*np.log(2.0) - next_norm_noise_action - tf.nn.softplus(-2*next_norm_noise_action), axis=1)
+            #self.log_prob_next -= tf.reduce_sum(2*np.log(2.0) - next_norm_noise_action - tf.nn.softplus(-2*next_norm_noise_action), axis=1)
+            self.log_prob_next -= tf.reduce_sum(2*(np.log(2.0) - next_norm_noise_action - tf.nn.softplus(-2*next_norm_noise_action)) + tf.log(self.action_bound_max), axis=1)
 
             #q_pi
             self.q1_pi = self.build_q_value_model(self.states, self.sample_noise_action, 'q1', reuse=True)
