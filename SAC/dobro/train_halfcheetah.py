@@ -42,7 +42,7 @@ def train():
     max_ep_len = min(1000, env.spec.max_episode_steps)
     start_training_after_steps = 1000
     step_per_training = 50
-    epochs = int(1e5)
+    epochs = int(1e3)
     save_freq = 10
 
     record_length = 10
