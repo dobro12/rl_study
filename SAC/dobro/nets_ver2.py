@@ -57,8 +57,6 @@ class Agent:
             self.next_mean, self.next_log_std, self.next_std = self.build_policy_model(self.next_states, 'policy', reuse=True)
             self.q1 = self.build_q_value_model(self.states, self.actions, 'q1')
             self.q2 = self.build_q_value_model(self.states, self.actions, 'q2')
-            self.q1_target = self.build_q_value_model(self.states, self.actions, 'target_q1')
-            self.q2_target = self.build_q_value_model(self.states, self.actions, 'target_q2')
 
             #action
             gaussian_noise = tf.random_normal(tf.shape(self.mean))
@@ -79,6 +77,12 @@ class Agent:
             next_norm_noise_action = next_mean + tf.multiply(next_gaussian_noise, next_std)
             self.log_prob_next = -tf.reduce_sum(next_log_std + 0.5*np.log(2*np.pi) + 0.5*tf.square(next_gaussian_noise), axis=1)
             self.log_prob_next -= tf.reduce_sum(2*(np.log(2.0) - next_norm_noise_action - tf.nn.softplus(-2*next_norm_noise_action)) + tf.log(self.action_bound_max), axis=1)
+            next_norm_noise_action = tf.nn.tanh(next_norm_noise_action)
+            next_sample_noise_action = self.unnormalize_action(next_norm_noise_action)
+
+            # target Q value
+            self.q1_target = self.build_q_value_model(self.next_states, next_sample_noise_action, 'target_q1')
+            self.q2_target = self.build_q_value_model(self.next_states, next_sample_noise_action, 'target_q2')
 
             #q_pi
             self.q1_pi = self.build_q_value_model(self.states, self.sample_noise_action, 'q1', reuse=True)
@@ -92,7 +96,7 @@ class Agent:
 
             #value loss
             q_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name+'/q')
-            self.target_value = self.rewards + self.discount_factor*(1 - self.dones)*(tf.minimum(self.q1, self.q2) - self.alpha*self.log_prob_next)
+            self.target_value = self.rewards + self.discount_factor*(1 - self.dones)*(tf.minimum(self.q1_target, self.q2_target) - self.alpha*self.log_prob_next)
             self.target_value = tf.stop_gradient(self.target_value)
             self.q_loss = tf.reduce_mean(0.5*tf.square(self.target_value - self.q1))
             self.q_loss += tf.reduce_mean(0.5*tf.square(self.target_value - self.q2))
