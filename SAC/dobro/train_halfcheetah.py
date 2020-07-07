@@ -19,18 +19,16 @@ import gym
 env_name = 'HalfCheetah-v2'
 
 save_name = env_name.split('-')[0]
-agent_args = {'agent_name':'PPO',
+agent_args = {'agent_name':'SAC',
             'env_name':save_name,
             'discount_factor':0.99,
-            'hidden1':64,
-            'hidden2':64,
-            'v_lr':1e-3,
+            'hidden1':256,
+            'hidden2':256,
+            'q_lr':1e-3,
             'p_lr':1e-4,
-            'value_epochs':80,
-            'policy_epochs':10,
-            'clip_value':0.2,
-            'gae_coeff':0.97,
-            'ent_coeff':0.0,
+            'alpha':0.2,
+            'soft_update':0.005,
+            'batch_size':100,
             }
 
 def train():
@@ -38,52 +36,45 @@ def train():
     env = gym.make(env_name)
     agent = Agent(env, agent_args)
 
-    p_loss_logger = Logger(save_name, 'p_loss')
-    v_loss_logger = Logger(save_name, 'v_loss')
-    kl_logger = Logger(save_name, 'kl')
     score_logger = Logger(save_name, 'score')
-    graph = Graph(1000, save_name, ['score', 'policy loss', 'value loss', 'kl divergence', 'entropy'])
-    episodes = 10
+    graph = Graph(1000, save_name, ['score', 'policy loss', 'Q value loss', 'entropy'])
     max_steps = 4000
     max_ep_len = min(1000, env.spec.max_episode_steps)
+    start_training_after_steps = 1000
+    step_per_training = 50
     epochs = int(1e5)
     save_freq = 10
 
-    save_period = 10
-    p_losses = deque(maxlen=save_period)
-    v_losses = deque(maxlen=save_period)
-    kl_divergence = deque(maxlen=save_period)
-    entropies = deque(maxlen=save_period)
-    scores = deque(maxlen=save_period*episodes)
+    record_length = 10
+    p_losses = deque(maxlen=record_length*int(max_ep_len/step_per_training))
+    q_losses = deque(maxlen=record_length*int(max_ep_len/step_per_training))
+    entropies = deque(maxlen=record_length*int(max_ep_len/step_per_training))
+    scores = deque(maxlen=record_length)
 
+    total_step = 0 
     for epoch in range(epochs):
-        states = []
-        actions = []
-        targets = []
-        next_states = []
-        rewards = []
-        gaes = []
         ep_step = 0
-        #for episode in range(episodes):
         while ep_step < max_steps:
             state = env.reset()
-            done = False
             score = 0
             step = 0
-            temp_rewards = []
-            values = []
             while True:
                 step += 1
                 ep_step += 1
-                action, clipped_action, value = agent.get_action(state, True)
-                next_state, reward, done, info = env.step(clipped_action)
+                total_step += 1
+                action = agent.get_action(state, True)
+                next_state, reward, done, info = env.step(action)
+                done = False if step >= max_ep_len else done
 
-                states.append(state)
-                actions.append(action)
-                temp_rewards.append(reward)
-                next_states.append(next_state)
-                rewards.append(reward)
-                values.append(value)
+                agent.replay_memory.append([state, action, reward, np.float(done), next_state])
+
+                if len(agent.replay_memory) > start_training_after_steps and (total_step + 1)%step_per_training == 0:
+                    for _ in range(step_per_training):
+                        p_loss, q_loss, entropy = agent.train()
+                    p_losses.append(p_loss)
+                    q_losses.append(q_loss)
+                    entropies.append(entropy)
+                    print(np.mean(scores), np.mean(p_losses), np.mean(q_losses), np.mean(entropies))
 
                 state = next_state
                 score += reward
@@ -91,37 +82,13 @@ def train():
                 if done or step >= max_ep_len:
                     break
 
-            if step >= max_ep_len:
-                action, clipped_action, value = agent.get_action(state, True)
-            else: #중간에 끝난 거면, 다 돌기전에 죽어버린거니, value = 0 으로 해야함
-                value = 0
-                print("done before max_ep_len...") 
-            next_values = values[1:] + [value]
-            temp_gaes, temp_targets = agent.get_gaes_targets(temp_rewards, values, next_values)
-            targets += list(temp_targets)
-            gaes += list(temp_gaes)
-
             score_logger.write([step, score])
             scores.append(score)
 
-        trajs = [states, actions, targets, next_states, rewards, gaes]
-        p_loss, v_loss, kl, entropy = agent.train(trajs)
+            graph.update([np.mean(scores), np.mean(p_losses), np.mean(q_losses), np.mean(entropies)])
 
-        p_loss_logger.write([ep_step, p_loss])
-        v_loss_logger.write([ep_step, v_loss])
-        kl_logger.write([ep_step, kl])
-        p_losses.append(p_loss)
-        v_losses.append(v_loss)
-        kl_divergence.append(kl)
-        entropies.append(entropy)
-
-        print(np.mean(scores), np.mean(p_losses), np.mean(v_losses), np.mean(kl_divergence), np.mean(entropies))
-        graph.update([np.mean(scores), np.mean(p_losses), np.mean(v_losses), np.mean(kl_divergence), np.mean(entropies)])
         if (epoch+1)%save_freq == 0:
             agent.save()
-            p_loss_logger.save()
-            v_loss_logger.save()
-            kl_logger.save()
             score_logger.save()
 
     graph.update(None, finished=True)
