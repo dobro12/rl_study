@@ -10,14 +10,8 @@ import os
 font = {'size'   : 14}
 rc('font', **font)
 
-#env_name = 'MountainCarContinuous'
-#env_name = 'Pendulum'
-#env_name = 'CartPole'
-env_name = 'HalfCheetah'
-#env_name = "Safexp_PointGoal1"
+env_name = 'HalfCheetah_ver2'
 item_name = 'score'
-#item_name = 'cost'
-#item_name = 'loss'
 moving_period = 100
 
 def smoothing(steps, records):
@@ -35,6 +29,7 @@ def smoothing(steps, records):
     return iters, smooth
 
 dir_names = ['{}/{}_log'.format(env_name, item_name)]
+print(dir_names)
 
 records = []
 for dir_name in dir_names:

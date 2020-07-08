@@ -37,12 +37,12 @@ def train():
     agent = Agent(env, agent_args)
 
     score_logger = Logger(save_name, 'score')
-    graph = Graph(1000, save_name, ['score', 'policy loss', 'Q value loss', 'entropy'])
+    #graph = Graph(1000, save_name, ['score', 'policy loss', 'Q value loss', 'entropy'])
     max_steps = 4000
     max_ep_len = min(1000, env.spec.max_episode_steps)
     start_training_after_steps = 1000
     step_per_training = 50
-    epochs = int(1e5)
+    epochs = 5000
     save_freq = 10
 
     record_length = 10
@@ -85,13 +85,13 @@ def train():
             score_logger.write([step, score])
             scores.append(score)
 
-            graph.update([np.mean(scores), np.mean(p_losses), np.mean(q_losses), np.mean(entropies)])
+            #graph.update([np.mean(scores), np.mean(p_losses), np.mean(q_losses), np.mean(entropies)])
 
         if (epoch+1)%save_freq == 0:
             agent.save()
             score_logger.save()
 
-    graph.update(None, finished=True)
+    #graph.update(None, finished=True)
 
 def test():
     global env_name, save_name, agent_args
