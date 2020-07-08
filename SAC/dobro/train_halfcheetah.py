@@ -16,7 +16,8 @@ import time
 import sys
 import gym
 
-env_name = 'HalfCheetah-v2'
+#env_name = 'HalfCheetah-v2'
+env_name = 'HalfCheetah-v3'
 
 save_name = env_name.split('-')[0]
 agent_args = {'agent_name':'SAC',

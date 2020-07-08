@@ -21,7 +21,7 @@ class Agent:
         self.id = id
         self.env = env
         self.name = args['agent_name']
-        self.checkpoint_dir='{}_ver2/checkpoint'.format(args['env_name'])
+        self.checkpoint_dir='{}/checkpoint'.format(args['env_name'])
         self.discount_factor = args['discount_factor']
         self.state_dim = env.observation_space.shape[0]
         try:
@@ -40,7 +40,8 @@ class Agent:
         self.soft_update = args.get('soft_update', 0.005)
         self.batch_size = args.get('batch_size', 100)
 
-        self.replay_memory = deque(maxlen=int(1e5))
+        #self.replay_memory = deque(maxlen=int(1e5))
+        self.replay_memory = deque(maxlen=int(1e6))
         self.is_loaded = False
 
         with tf.variable_scope(self.name):
