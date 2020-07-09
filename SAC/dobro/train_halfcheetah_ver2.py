@@ -26,10 +26,11 @@ agent_args = {'agent_name':'SAC',
             'hidden1':256,
             'hidden2':256,
             'q_lr':1e-3,
-            'p_lr':1e-4,
-            'alpha':0.2,
+            'p_lr':1e-3,
+            'alpha':0.1,
             'soft_update':0.005,
-            'batch_size':100,
+            'batch_size':256, #100,
+            'replay_memory':1e5,
             }
 
 def train():
@@ -43,8 +44,8 @@ def train():
     max_ep_len = min(1000, env.spec.max_episode_steps)
     start_training_after_steps = 1000
     step_per_training = 50
-    epochs = 5000
-    save_freq = 10
+    epochs = 1000
+    save_freq = 1
 
     record_length = 10
     p_losses = deque(maxlen=record_length*int(max_ep_len/step_per_training))
@@ -99,16 +100,18 @@ def test():
     env = gym.make(env_name)
     agent = Agent(env, agent_args)
 
-    episodes = int(1e6)
+    episodes = int(1e2)
 
     for episode in range(episodes):
         state = env.reset()
         done = False
         score = 0
-        while not done:
-            action, clipped_action, value = agent.get_action(state, False)
+        step = 0
+        while step < 1000:
+            step += 1
+            action = agent.get_action(state, False)
             #action, clipped_action, value = agent.get_action(state, True)
-            state, reward, done, info = env.step(clipped_action)
+            state, reward, done, info = env.step(action)
             score += reward
             env.render()
             time.sleep(0.01)

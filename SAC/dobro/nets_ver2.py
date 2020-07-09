@@ -39,9 +39,7 @@ class Agent:
         self.alpha = args.get('alpha', 0.2)
         self.soft_update = args.get('soft_update', 0.005)
         self.batch_size = args.get('batch_size', 100)
-
-        #self.replay_memory = deque(maxlen=int(1e5))
-        self.replay_memory = deque(maxlen=int(1e6))
+        self.replay_memory = deque(maxlen=int(args.get('replay_memory', 1e5)))
         self.is_loaded = False
 
         with tf.variable_scope(self.name):

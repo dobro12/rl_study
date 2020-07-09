@@ -12,7 +12,7 @@ rc('font', **font)
 
 env_name = 'HalfCheetah_ver2'
 item_name = 'score'
-moving_period = 100
+moving_period = 10
 
 def smoothing(steps, records):
     iters = []
