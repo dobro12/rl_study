@@ -26,10 +26,10 @@ agent_args = {'agent_name':'SAC',
             'hidden1':256,
             'hidden2':256,
             'q_lr':1e-3,
-            'p_lr':1e-4,
+            'p_lr':1e-3,
             'alpha':0.2,
             'soft_update':0.005,
-            'batch_size':100,
+            'batch_size':256,
             }
 
 def train():
@@ -43,8 +43,8 @@ def train():
     max_ep_len = min(1000, env.spec.max_episode_steps)
     start_training_after_steps = 1000
     step_per_training = 50
-    epochs = int(1e3)
-    save_freq = 10
+    epochs = 1000
+    save_freq = 1
 
     record_length = 10
     p_losses = deque(maxlen=record_length*int(max_ep_len/step_per_training))
