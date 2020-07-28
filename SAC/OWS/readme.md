@@ -1,5 +1,7 @@
 # SAC Result
 
 ## Pendulum
-[image](./average_reward.png)
+- ![average_reward](./average_reward.png)
+- ![smoothed_reward](./smoothed_reward.png)
+
 
