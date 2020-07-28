@@ -1,5 +1,5 @@
 # SAC Result
 
 ## Pendulum
-[image](./average_reward)
+[image](./average_reward.png)
 
