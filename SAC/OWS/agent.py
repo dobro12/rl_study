@@ -6,6 +6,7 @@ import torch.optim as optim
 from sac_network import network_basic
 from sac_network import policy_network
 import visdom
+import time
 
 class Agent:
     def __init__(self, **kwargs):
@@ -73,6 +74,12 @@ class sac_Agent(Agent):
         self.q_network1 = network_basic(self.state_dim+self.action_dim, 1)
         self.q_network2 = network_basic(self.state_dim+self.action_dim, 1)
         self.policy = policy_network(self.state_dim , self.action_dim)
+
+        self.value_network.initialize()
+        self.q_network1.initialize()
+        self.q_network2.initialize()
+        self.policy.initialize()
+
         self.target_value_network.load_state_dict(self.value_network.state_dict())
         
         if(torch.cuda.is_available()):
@@ -96,15 +103,14 @@ class sac_Agent(Agent):
         mu,var = self.policy(state)
         mu = mu.squeeze()
         var = var.squeeze()
-        noise = torch.Tensor([ [ torch.normal(mean=torch.zeros(self.action_dim)) ] for i in range(num_batch) ] )
+        noise = torch.Tensor([ [ torch.normal(mean=torch.zeros(self.action_dim)).numpy() ] for i in range(num_batch) ] )
         noise = noise.squeeze()
-        if(len(mu.shape) == 0 or len(mu.shape)==1):
+        if(len(mu.shape) == 0):
             mu = mu.unsqueeze(-1)
             var = var.unsqueeze(-1)
             noise = noise.unsqueeze(-1)
         if(torch.cuda.is_available()):
             noise=noise.cuda()
-
         unbounded_action = var**(1./2)  * noise + mu        
         bounded_action = torch.tanh(unbounded_action) * self.action_scale + self.action_mean  
         return bounded_action, unbounded_action, mu, var 
@@ -145,9 +151,13 @@ class sac_Agent(Agent):
    
     def train(self, batch, epoch, t, done):
         self.set_train()
+
         self.update_param(batch) if t % self.gradients_step is 0 else True
+
         self.target_net_update() if t % self.target_update_interval is 0 else True
+
         if(done):
+            #self.learning_rate = self.learning_rate * self.gamma
             self.save_agent( self.path, epoch)
             if(self.loss_cnt != 0):
                 print("value_loss : {0:.4f} , q1_loss : {1:.4f} , q2_loss : {2:.4f} , policy_loss : {3:.4f} ".format\
@@ -219,7 +229,7 @@ class sac_Agent(Agent):
     
     def get_log_policy_value(self, action, unbounded_action , mu, var ):
         ones = torch.ones_like(unbounded_action).cuda() if torch.cuda.is_available() else torch.ones_like(unbounded_action)
-        jacobian_sum = torch.log(torch.clamp( ((ones - torch.tanh(unbounded_action)**2)* self.action_scale.unsqueeze(1).expand_as(ones) ), 1e-10) ).sum(1).unsqueeze(1)
+        jacobian_sum = torch.log(torch.clamp( ((ones - torch.tanh(unbounded_action)**2)* self.action_scale.unsqueeze(0).expand_as(ones) ), 1e-10) ).sum(1).unsqueeze(1)
         log_prob_unbounded = -0.5*(unbounded_action - mu)**2/var - torch.log(torch.clamp(2*3.141592*var , 1e-10))
         log_prob_action = log_prob_unbounded - jacobian_sum.expand_as(unbounded_action)
         return log_prob_action

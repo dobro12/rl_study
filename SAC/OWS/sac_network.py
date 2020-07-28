@@ -15,7 +15,10 @@ class network_basic(nn.Module):
         x = F.relu(self.linear2(x))
         out = self.linear3(x)
         return out
-
+    def initialize(self):
+        torch.nn.init.xavier_uniform_(self.linear1.weight)
+        torch.nn.init.xavier_uniform_(self.linear2.weight)
+        torch.nn.init.xavier_uniform_(self.linear3.weight)
 
 class policy_network(network_basic):
     def __init__(self, in_dim, out_dim):
@@ -27,6 +30,11 @@ class policy_network(network_basic):
         variance = F.softplus(self.linear4(x))
         mean = self.linear3(x)
         return mean, variance
+    def initialize(self):
+        torch.nn.init.xavier_uniform_(self.linear1.weight)
+        torch.nn.init.xavier_uniform_(self.linear2.weight)
+        torch.nn.init.xavier_uniform_(self.linear3.weight)
+        torch.nn.init.xavier_uniform_(self.linear4.weight)
 
 
     

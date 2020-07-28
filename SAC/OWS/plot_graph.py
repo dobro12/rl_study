@@ -16,7 +16,6 @@ with open(path,'rb') as f:
     data = pickle.load(f)
 
 data = np.array(data)
-
 mean_data = np.mean(data,axis = 0)
 std_data = np.var(data, axis=0) ** (1/2.)
 
